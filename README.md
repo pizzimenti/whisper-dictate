@@ -1,33 +1,21 @@
-# whisper-cli (CPU-First, Laptop-Optimized)
+# whisper-dictate
 
-This project runs **high-accuracy Whisper transcription** from your **default system microphone** and prints text directly to the terminal in near real time.
+Local Whisper transcription for Wayland — two modes:
 
-No audio files are read for transcription input and no transcript files are written by default.
+1. **Live CLI** (`mic_realtime.py`): streams mic audio to the terminal in real time.
+2. **System dictation daemon** (`dictate.py`): toggle recording with a global hotkey; types the result into any focused window via `wtype`.
 
-It uses:
-- `distil-whisper/distil-large-v3` as the default source model
-- CTranslate2 conversion + int8 quantization for faster local inference
-- `faster-whisper` for efficient transcription runtime
-
-## Why this setup
-
-On this machine type (no NVIDIA CUDA GPU detected), the best practical local path is:
-1. Convert the model to CTranslate2 format.
-2. Run inference on CPU with `int8`.
-3. Default to a larger distilled model for better accuracy.
-4. Keep runtime CPU-only for predictable local behavior.
+Uses `distil-whisper/distil-large-v3` converted to CTranslate2 int8 for CPU-only inference.
 
 ## Quick start
 
 ```bash
-cd whisper-cli
+cd whisper-dictate
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -U pip
 pip install -r requirements.txt
 ```
-
-`requirements.txt` is configured to use a CPU-only PyTorch wheel (no CUDA runtime packages).
 
 Convert the model once:
 
@@ -35,9 +23,9 @@ Convert the model once:
 python prepare_model.py
 ```
 
-If `torch` is unavailable for your Python version, create a Python 3.12 venv for conversion.
+If `torch` is unavailable for your Python version, use a Python 3.12 venv for this step only.
 
-Run live mic transcription:
+### Live CLI
 
 ```bash
 python mic_realtime.py
@@ -45,31 +33,59 @@ python mic_realtime.py
 
 Press `Enter` to stop.
 
-`mic_realtime.py` currently uses a simple baseline speech gate and stock-like decode settings for testing.
+### System dictation daemon
 
-## Files
+Install `wtype` for Wayland text injection:
 
-- `prepare_model.py`: downloads/converts the default model to local CTranslate2 format.
-- `mic_realtime.py`: captures default microphone input and prints live text to terminal.
-- `transcribe.py`: transcribes a single file with laptop-tuned defaults.
-- `benchmark.py`: measures latency and real-time factor across multiple runs.
-- `runtime_profile.py`: hardware-aware runtime defaults.
+```bash
+sudo pacman -S wtype
+```
 
-## Tuning knobs
+Start the daemon manually:
+
+```bash
+source .venv/bin/activate
+python dictate.py
+```
+
+Or enable as a systemd user service (auto-starts with your session):
+
+```bash
+cp whisper-dictate.service ~/.config/systemd/user/
+systemctl --user enable --now whisper-dictate
+```
+
+Bind a global hotkey to `toggle.sh`. On KDE:
+
+- Open **System Settings → Shortcuts → Custom Shortcuts**
+- Add a new command shortcut pointing to `~/Code/whisper-dictate/toggle.sh`
+- Assign a key (e.g. `Meta+Alt+Space`)
+
+Press the hotkey once to start recording, again to stop — the transcribed text is typed at the cursor.
+
+## Tuning
 
 - `--cpu-threads N`: override thread count.
 - `--compute-type int8|float16|float32`: precision/runtime tradeoff.
-- `--task transcribe|translate`: keep original language vs force English translation.
-- `--language`: defaults to `en` for no-flag runs.
-- `--energy-threshold`: raise this if room noise is triggering false speech.
-- `--silence-ms`: lower for faster phrase commits, higher for longer phrases.
-- `--max-utterance-s`: cap utterance length before forced decode.
-- `--beam-size`: defaults to 5 (stock), lower is faster.
-- `--decode-workers`: parallel decode workers (higher can increase CPU utilization).
-- `--diag` / `--diag-interval-s`: periodic runtime diagnostics to stderr for bottleneck analysis.
+- `--language`: defaults to `en`.
+- `--beam-size`: defaults to 5.
+- `--energy-threshold`, `--silence-ms`, `--max-utterance-s`: VAD controls (CLI mode only).
+- `--task transcribe|translate`: keep original language vs force English output (CLI mode only).
+- `--decode-workers`, `--diag`, `--diag-interval-s`: parallelism and diagnostics (CLI mode only).
+
+## Files
+
+- `prepare_model.py`: download and convert the model.
+- `mic_realtime.py`: live terminal transcription.
+- `dictate.py`: system-wide dictation daemon.
+- `toggle.sh`: send toggle signal to the daemon.
+- `whisper-dictate.service`: systemd user unit.
+- `transcribe.py`: transcribe an audio file.
+- `benchmark.py`: latency and RTF benchmarking.
+- `runtime_profile.py`: shared CPU/runtime helpers.
 
 ## Notes
 
-- First conversion/download can take time and several GB of storage.
-- This project intentionally runs CPU-only.
-- Live mode does not create transcript files unless you explicitly redirect terminal output.
+- First conversion can take time and several GB of storage.
+- CPU-only; no CUDA or ROCm required.
+- Live mode does not create transcript files unless you redirect terminal output.

@@ -1,0 +1,13 @@
+[Unit]
+Description=Whisper-Dictate daemon
+After=graphical-session.target sound.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Code/whisper-dictate
+ExecStart=%h/Code/whisper-dictate/.venv/bin/python %h/Code/whisper-dictate/dictate.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
