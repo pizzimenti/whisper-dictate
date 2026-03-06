@@ -3,7 +3,7 @@ from __future__ import annotations
 """Whisper-KDE system dictation daemon.
 
 Send SIGUSR1 to toggle recording on/off. On stop, transcribes the captured
-audio and types the result into the focused window via wtype.
+audio and types the result into the focused window via ydotool.
 
 Intended to run as a long-lived process (e.g. systemd user service) so the
 model stays loaded in memory between recordings.
@@ -29,7 +29,7 @@ def _notify(msg: str) -> None:
 
 
 def _type_text(text: str) -> None:
-    subprocess.run(["wtype", "--", text], check=False)
+    subprocess.run(["ydotool", "type", "--", text], check=False)
 
 
 def parse_args() -> argparse.Namespace:

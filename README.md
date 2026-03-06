@@ -3,7 +3,7 @@
 Local Whisper transcription for Wayland — two modes:
 
 1. **Live CLI** (`mic_realtime.py`): streams mic audio to the terminal in real time.
-2. **System dictation daemon** (`dictate.py`): toggle recording with a global hotkey; types the result into any focused window via `wtype`.
+2. **System dictation daemon** (`dictate.py`): toggle recording with a global hotkey; types the result into any focused window via `ydotool`.
 
 Uses `distil-whisper/distil-large-v3` converted to CTranslate2 int8 for CPU-only inference.
 
@@ -35,31 +35,22 @@ Press `Enter` to stop.
 
 ### System dictation daemon
 
-Install `wtype` for Wayland text injection:
+On Arch/Manjaro, `install.sh` handles everything automatically:
 
 ```bash
-sudo pacman -S wtype
+bash install.sh
 ```
 
-Start the daemon manually:
+It installs `ydotool`, enables the system service, adds you to the `input` group, and registers the `whisper-dictate` systemd user service. Log out and back in after running it for the group change to take effect.
+
+To start the daemon manually instead:
 
 ```bash
 source .venv/bin/activate
 python dictate.py
 ```
 
-Or enable as a systemd user service (auto-starts with your session):
-
-```bash
-cp whisper-dictate.service ~/.config/systemd/user/
-systemctl --user enable --now whisper-dictate
-```
-
-Bind a global hotkey to `toggle.sh`. On KDE:
-
-- Open **System Settings → Shortcuts → Custom Shortcuts**
-- Add a new command shortcut pointing to `~/Code/whisper-dictate/toggle.sh`
-- Assign a key (e.g. `Meta+Alt+Space`)
+**Hotkey (manual step):** Bind `toggle.sh` to a key in System Settings → Shortcuts → Custom Shortcuts. `Meta+Space` works well.
 
 Press the hotkey once to start recording, again to stop — the transcribed text is typed at the cursor.
 
@@ -75,6 +66,7 @@ Press the hotkey once to start recording, again to stop — the transcribed text
 
 ## Files
 
+- `install.sh`: install dependencies and register the systemd service (Arch/Manjaro).
 - `prepare_model.py`: download and convert the model.
 - `mic_realtime.py`: live terminal transcription.
 - `dictate.py`: system-wide dictation daemon.
