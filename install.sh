@@ -20,8 +20,10 @@ systemctl --user enable --now whisper-dictate
 
 echo ""
 echo "Done. One manual step remaining:"
-echo "  Bind ~/Code/whisper-dictate/toggle.sh to a hotkey in:"
+echo "  Bind ~/Code/whisper-dictate/ptt-press.sh on key press and"
+echo "  ~/Code/whisper-dictate/ptt-release.sh on key release in:"
 echo "  System Settings → Shortcuts → Custom Shortcuts"
+echo "  ~/Code/whisper-dictate/toggle.sh remains available as a fallback."
 echo ""
 echo "NOTE: Log out and back in (or reboot) for the input group change to take effect."
 echo "      The whisper-dictate service will start automatically on your next login."

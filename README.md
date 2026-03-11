@@ -3,7 +3,7 @@
 Local Whisper transcription for Wayland — two modes:
 
 1. **Live CLI** (`mic_realtime.py`): streams mic audio to the terminal in real time.
-2. **System dictation daemon** (`dictate.py`): toggle recording with a global hotkey; types the result into any focused window via `ydotool`.
+2. **System dictation daemon** (`dictate.py`): push-to-talk dictation with global hotkeys; types the result into any focused window via `ydotool`.
 
 This project is standardized on `distil-whisper/distil-medium.en` converted to CTranslate2 int8 for local English dictation on CPU.
 
@@ -52,9 +52,9 @@ source .venv/bin/activate
 python dictate.py
 ```
 
-**Hotkey (manual step):** Bind `toggle.sh` to a key in System Settings → Shortcuts → Custom Shortcuts. `Meta+Space` works well.
+**Hotkey (manual step):** Bind `ptt-press.sh` on key press and `ptt-release.sh` on key release in System Settings → Shortcuts → Custom Shortcuts. `Meta+Space` works well. If your shortcut tool cannot emit release events, `toggle.sh` remains available as a fallback.
 
-Press the hotkey once to start recording, again to stop — the transcribed text is typed at the cursor.
+Hold the hotkey while speaking and release it to transcribe. The transcribed text is typed at the cursor.
 
 ## Tuning
 
@@ -63,10 +63,12 @@ Press the hotkey once to start recording, again to stop — the transcribed text
 - `--compute-type int8|float16|float32`: precision/runtime tradeoff.
 - `--language`: defaults to `en`.
 - `--beam-size`: daemon and live CLI default to 1.
-- `--vad-filter/--no-vad-filter`: daemon defaults to `vad_filter=True` to strip silence before decode.
+- `--state-file`: daemon runtime state file used by `ptt-press.sh`, `ptt-release.sh`, and `toggle.sh`.
+- `--vad-filter/--no-vad-filter`: daemon defaults to `vad_filter=False` for lower-latency short-form dictation.
 - `--condition-on-previous-text/--no-condition-on-previous-text`: daemon defaults to `False` to reduce cascading hallucinations.
 - `--no-speech-threshold`: daemon defaults to `0.6` to reject low-confidence speech.
-- `--energy-threshold`, `--silence-ms`, `--max-utterance-s`: VAD controls (CLI mode only).
+- `--energy-threshold`, `--start-speech-ms`, `--silence-ms`, `--max-utterance-s`: live CLI utterance-boundary controls.
+- `--no-speech-threshold`: Whisper-side non-speech rejection for live CLI and daemon decode.
 - `--task transcribe|translate`: keep original language vs force English output (CLI mode only).
 - `--decode-workers`, `--diag`, `--diag-interval-s`: parallelism and diagnostics (CLI mode only).
 
@@ -76,7 +78,9 @@ Press the hotkey once to start recording, again to stop — the transcribed text
 - `prepare_model.py`: download and convert the model.
 - `mic_realtime.py`: live terminal transcription.
 - `dictate.py`: system-wide dictation daemon.
-- `toggle.sh`: send toggle signal to the daemon.
+- `ptt-press.sh`: start a push-to-talk recording.
+- `ptt-release.sh`: stop recording and transcribe.
+- `toggle.sh`: fallback toggle helper for shortcut tools that only support key press.
 - `whisper-dictate.service`: systemd user unit.
 - `transcribe.py`: transcribe an audio file.
 - `benchmark.py`: latency and RTF benchmarking.
@@ -96,6 +100,7 @@ Each sweep writes `summary.json`, `leaderboard.csv`, `leaderboard.md`, and one J
 Local March 11, 2026 results on the bundled 20-sample LibriSpeech set:
 
 - Best speed/latency tradeoff: `distil-medium-en`, beam 1, `without_timestamps=True`, `cpu_threads=6` → avg normalized WER `2.49%`, overall RTF `0.361`, short clips (`<=4s`) averaged `2.91s`.
+- Best dictation defaults from the later exhaustive `distil-medium` sweep: `compute_type=int8`, `beam_size=1`, `cpu_threads=6`, `without_timestamps=True`, `vad_filter=False`, `condition_on_previous_text=False` for live cursor dictation.
 - Historical cross-model comparisons are retained in `eval/results/`, but they are not part of the active runtime anymore.
 
 ## Notes

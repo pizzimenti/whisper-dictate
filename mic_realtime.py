@@ -116,12 +116,24 @@ def parse_args() -> argparse.Namespace:
         help="Minimum speech duration required to transcribe an utterance.",
     )
     parser.add_argument(
+        "--start-speech-ms",
+        type=int,
+        default=90,
+        help="Consecutive voiced duration required before an utterance starts.",
+    )
+    parser.add_argument(
         "--max-utterance-s",
         type=float,
         default=2.5,
         help="Force transcription when an utterance reaches this length.",
     )
     parser.add_argument("--beam-size", type=int, default=1, help="Whisper beam size.")
+    parser.add_argument(
+        "--no-speech-threshold",
+        type=float,
+        default=0.6,
+        help="Reject low-confidence non-speech segments inside Whisper decode.",
+    )
     parser.add_argument(
         "--decode-workers",
         type=int,
@@ -151,7 +163,14 @@ def _wait_for_enter(stop_event: threading.Event) -> None:
     stop_event.set()
 
 
-def _transcribe_utterance(model, utterance_pcm: list["np.ndarray"], language: str | None, task: str, beam_size: int) -> str:
+def _transcribe_utterance(
+    model,
+    utterance_pcm: list["np.ndarray"],
+    language: str | None,
+    task: str,
+    beam_size: int,
+    no_speech_threshold: float,
+) -> str:
     import numpy as np
 
     if not utterance_pcm:
@@ -170,6 +189,8 @@ def _transcribe_utterance(model, utterance_pcm: list["np.ndarray"], language: st
         best_of=1,
         temperature=0.0,
         condition_on_previous_text=False,
+        vad_filter=False,
+        no_speech_threshold=no_speech_threshold,
         without_timestamps=True,
     )
     text = " ".join(s.text.strip() for s in segments if s.text and s.text.strip()).strip()
@@ -220,6 +241,7 @@ def _decode_worker(
     language: str | None,
     task: str,
     beam_size: int,
+    no_speech_threshold: float,
 ) -> None:
     while True:
         item = utterance_queue.get()
@@ -247,7 +269,14 @@ def _decode_worker(
 
         started = time.perf_counter()
         try:
-            text = _transcribe_utterance(model, utterance_pcm, language, task, beam_size)
+            text = _transcribe_utterance(
+                model,
+                utterance_pcm,
+                language,
+                task,
+                beam_size,
+                no_speech_threshold,
+            )
         except Exception:  # noqa: BLE001
             text = ""
             with stats.lock:
@@ -362,6 +391,7 @@ def main() -> int:
     block_size = max(1, int(args.sample_rate * (args.block_ms / 1000.0)))
     silence_blocks = max(1, int(args.silence_ms / args.block_ms))
     min_speech_blocks = max(1, int(args.min_speech_ms / args.block_ms))
+    start_speech_blocks = max(1, int(args.start_speech_ms / args.block_ms))
     max_utterance_blocks = max(1, int((args.max_utterance_s * 1000.0) / args.block_ms))
 
     audio_queue: queue.Queue[np.ndarray] = queue.Queue(maxsize=512)
@@ -403,6 +433,7 @@ def main() -> int:
                 args.language,
                 args.task,
                 args.beam_size,
+                args.no_speech_threshold,
             ),
             daemon=True,
         )
@@ -440,13 +471,17 @@ def main() -> int:
     )
 
     utterance_pcm: list[np.ndarray] = []
+    pending_speech_pcm: list[np.ndarray] = []
+    pending_silence_pcm: list[np.ndarray] = []
     in_speech = False
     speech_block_count = 0
+    pending_speech_block_count = 0
     trailing_silence_count = 0
     next_utterance_id = 0
 
     def _commit_utterance() -> None:
-        nonlocal in_speech, speech_block_count, trailing_silence_count, utterance_pcm, next_utterance_id
+        nonlocal in_speech, speech_block_count, pending_speech_block_count, trailing_silence_count
+        nonlocal utterance_pcm, pending_speech_pcm, pending_silence_pcm, next_utterance_id
         if speech_block_count >= min_speech_blocks and utterance_pcm:
             audio_samples = sum(len(chunk) for chunk in utterance_pcm)
             audio_seconds = audio_samples / float(args.sample_rate)
@@ -461,12 +496,15 @@ def main() -> int:
                     stats.utterances_dropped += 1
         in_speech = False
         speech_block_count = 0
+        pending_speech_block_count = 0
         trailing_silence_count = 0
         utterance_pcm = []
+        pending_speech_pcm = []
+        pending_silence_pcm = []
 
     def audio_callback(indata, frames, callback_time, status) -> None:
         del frames, callback_time
-        if status:
+        if status or stop_event.is_set():
             return
         chunk = indata[:, 0].copy()
         with stats.lock:
@@ -499,16 +537,29 @@ def main() -> int:
 
             if voiced:
                 if not in_speech:
-                    in_speech = True
-                    speech_block_count = 0
+                    pending_speech_pcm.append(chunk)
+                    pending_speech_block_count += 1
+                    if pending_speech_block_count >= start_speech_blocks:
+                        in_speech = True
+                        utterance_pcm = list(pending_speech_pcm)
+                        speech_block_count = len(utterance_pcm)
+                        pending_speech_pcm = []
+                        pending_speech_block_count = 0
+                        pending_silence_pcm = []
+                        trailing_silence_count = 0
+                else:
+                    if pending_silence_pcm:
+                        utterance_pcm.extend(pending_silence_pcm)
+                        pending_silence_pcm = []
+                    utterance_pcm.append(chunk)
+                    speech_block_count += 1
                     trailing_silence_count = 0
-                    utterance_pcm = []
-                utterance_pcm.append(chunk)
-                speech_block_count += 1
-                trailing_silence_count = 0
             elif in_speech:
-                utterance_pcm.append(chunk)
+                pending_silence_pcm.append(chunk)
                 trailing_silence_count += 1
+            else:
+                pending_speech_pcm = []
+                pending_speech_block_count = 0
 
             if in_speech and speech_block_count >= max_utterance_blocks:
                 with stats.lock:
