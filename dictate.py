@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Whisper-KDE system dictation daemon.
+"""Whisper-Dictate system dictation daemon.
 
 Send SIGUSR1 to start recording and SIGUSR2 to stop. On stop, the daemon
 transcribes the captured audio and types the result into the focused window
@@ -44,7 +44,7 @@ def _write_state(state_file: Path, value: str) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Whisper-KDE dictation daemon. SIGUSR1 starts recording, SIGUSR2 stops."
+        description="Whisper-Dictate daemon. SIGUSR1 starts recording, SIGUSR2 stops."
     )
     parser.add_argument(
         "--model-dir",
@@ -118,7 +118,7 @@ def main() -> int:
         f"cpu_threads={runtime['cpu_threads']}",
         flush=True,
     )
-    _notify("Whisper-KDE ready")
+    _notify("Whisper-Dictate ready")
 
     state_file = Path(args.state_file)
     _lock = threading.Lock()

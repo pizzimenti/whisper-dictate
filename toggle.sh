@@ -5,7 +5,7 @@ PID=$(pgrep -f "python.*dictate\.py" | head -1 || true)
 STATE_FILE="${XDG_RUNTIME_DIR:-/tmp}/whisper-dictate-${UID}.state"
 
 if [[ -z "$PID" ]]; then
-    echo "whisper-kde daemon is not running." >&2
+    echo "whisper-dictate daemon is not running." >&2
     exit 1
 fi
 
