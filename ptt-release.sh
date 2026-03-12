@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PID=$(pgrep -f "python.*dictate\.py" | head -1 || true)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-if [[ -z "$PID" ]]; then
-    echo "whisper-dictate daemon is not running." >&2
-    exit 1
-fi
-
-kill -USR2 "$PID"
+exec python3 "$SCRIPT_DIR/dictatectl.py" stop --no-wait

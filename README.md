@@ -1,9 +1,10 @@
 # whisper-dictate
 
-Local Whisper transcription for Wayland — two modes:
+Local Whisper transcription for Wayland — three pieces:
 
 1. **Live CLI** (`mic_realtime.py`): streams mic audio to the terminal in real time.
-2. **System dictation daemon** (`dictate.py`): push-to-talk dictation with global hotkeys; types the result into any focused window via `ydotool`.
+2. **System dictation daemon** (`dictate.py`): persistent mic capture/transcribe worker for dictation.
+3. **Global hotkey listener** (`kglobal_hotkey.py`): uses KWin's Wayland accessibility keyboard monitor to toggle dictation and always attempts to type the transcript into the current keyboard focus.
 
 This project is standardized on `distil-whisper/distil-medium.en` converted to CTranslate2 int8 for local English dictation on CPU.
 
@@ -52,9 +53,53 @@ source .venv/bin/activate
 python dictate.py
 ```
 
-**Hotkey (manual step):** Bind `ptt-press.sh` on key press and `ptt-release.sh` on key release in System Settings → Shortcuts → Custom Shortcuts. `Meta+Space` works well. If your shortcut tool cannot emit release events, `toggle.sh` remains available as a fallback.
+Recommended path on KDE/Wayland:
 
-Hold the hotkey while speaking and release it to transcribe. The transcribed text is typed at the cursor.
+```bash
+systemctl --user enable --now whisper-dictate
+systemctl --user enable --now whisper-dictate-hotkey
+```
+
+The hotkey listener grabs `Ctrl+Space` directly through KWin's accessibility keyboard monitor. On each press it:
+
+- starts dictation immediately
+- stops dictation on the next press
+- attempts to type the transcript into the current keyboard focus
+
+There is no AT-SPI cursor/editability gate anymore. If the current target cannot accept typed text, the transcript is still saved in the daemon runtime files and `ydotool` is simply attempted against whatever currently has keyboard focus.
+
+KWin currently restricts that keyboard-monitor interface to the screen-reader bus name `org.gnome.Orca.KeyboardMonitor`, so `whisper-dictate-hotkey.service` owns that name while it runs. If you use Orca, stop the hotkey service first or the listener will fail to start.
+
+If the hotkey listener is not running, or you want to test without the global shortcut backend, use the terminal control path instead:
+
+```bash
+python dictatectl.py start
+# speak
+python dictatectl.py stop
+```
+
+`stop` waits for transcription to finish and prints the latest transcript from the daemon runtime files, so you can test dictation without depending on a global shortcut backend.
+
+## Architecture
+
+- `dictate.py`: long-lived daemon that keeps the Whisper model warm, owns microphone capture/transcription, and writes shared runtime files.
+- `dictatectl.py`: stdlib control plane for `start`, `stop`, `toggle`, `status`, and `last-text`.
+- `kglobal_hotkey.py`: system-Python KWin keyboard-monitor listener for the working `Ctrl+Space` toggle.
+- `dictate_runtime.py`: shared runtime-path, daemon-state, and signaling helpers used by the daemon and control helpers.
+- `desktop_actions.py`: shared `notify-send` and `ydotool` wrappers for desktop side effects.
+
+### Runtime files
+
+The daemon and helpers coordinate through two files under `XDG_RUNTIME_DIR`:
+
+- `whisper-dictate-<uid>.state`: current daemon state (`idle`, `recording`, or `transcribing`)
+- `whisper-dictate-<uid>.last.txt`: latest completed transcript
+
+`dictate.py` owns writes to those files. `dictatectl.py` and `kglobal_hotkey.py` read them so control/status behavior stays consistent even though the hotkey listener runs under system Python.
+
+### Helper scripts
+
+`ptt-press.sh`, `ptt-release.sh`, and `toggle.sh` are now thin wrappers around `dictatectl.py`, so there is only one control-plane implementation to maintain.
 
 ## Tuning
 
@@ -63,12 +108,13 @@ Hold the hotkey while speaking and release it to transcribe. The transcribed tex
 - `--compute-type int8|float16|float32`: precision/runtime tradeoff.
 - `--language`: defaults to `en`.
 - `--beam-size`: daemon and live CLI default to 1.
-- `--state-file`: daemon runtime state file used by `ptt-press.sh`, `ptt-release.sh`, and `toggle.sh`.
+- `--state-file`: daemon runtime state file shared by `dictate.py`, `dictatectl.py`, and the helper scripts.
+- `--last-text-file`: latest transcript file shared by `dictate.py`, `dictatectl.py`, and the hotkey listener.
+- `--type-output/--no-type-output`: let the daemon type directly or leave typing to an external helper.
 - `--vad-filter/--no-vad-filter`: daemon defaults to `vad_filter=False` for lower-latency short-form dictation.
 - `--condition-on-previous-text/--no-condition-on-previous-text`: daemon defaults to `False` to reduce cascading hallucinations.
-- `--no-speech-threshold`: daemon defaults to `0.6` to reject low-confidence speech.
+- `--no-speech-threshold`: Whisper-side non-speech rejection. The daemon defaults to `0.6`.
 - `--energy-threshold`, `--start-speech-ms`, `--silence-ms`, `--max-utterance-s`: live CLI utterance-boundary controls.
-- `--no-speech-threshold`: Whisper-side non-speech rejection for live CLI and daemon decode.
 - `--task transcribe|translate`: keep original language vs force English output (CLI mode only).
 - `--decode-workers`, `--diag`, `--diag-interval-s`: parallelism and diagnostics (CLI mode only).
 
@@ -78,9 +124,14 @@ Hold the hotkey while speaking and release it to transcribe. The transcribed tex
 - `prepare_model.py`: download and convert the model.
 - `mic_realtime.py`: live terminal transcription.
 - `dictate.py`: system-wide dictation daemon.
-- `ptt-press.sh`: start a push-to-talk recording.
-- `ptt-release.sh`: stop recording and transcribe.
-- `toggle.sh`: fallback toggle helper for shortcut tools that only support key press.
+- `dictate_runtime.py`: shared runtime-path, state-file, and daemon-signaling helpers.
+- `desktop_actions.py`: shared desktop notification and typing helpers.
+- `dictatectl.py`: terminal control helper for `start`, `stop`, `toggle`, `status`, and `last-text`.
+- `kglobal_hotkey.py`: KWin accessibility hotkey listener that always attempts typing into the current keyboard focus.
+- `ptt-press.sh`: push-to-talk press wrapper around `dictatectl.py start --no-wait`.
+- `ptt-release.sh`: push-to-talk release wrapper around `dictatectl.py stop --no-wait`.
+- `toggle.sh`: fallback toggle wrapper around `dictatectl.py toggle --no-wait`.
+- `whisper-dictate-hotkey.service`: user service for the global hotkey listener.
 - `whisper-dictate.service`: systemd user unit.
 - `transcribe.py`: transcribe an audio file.
 - `benchmark.py`: latency and RTF benchmarking.
