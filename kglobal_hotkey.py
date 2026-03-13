@@ -17,7 +17,7 @@ from pathlib import Path
 
 import gi
 
-from desktop_actions import notify, type_text
+from desktop_actions import notify
 
 gi.require_version("Gio", "2.0")
 from gi.repository import Gio, GLib
@@ -219,13 +219,11 @@ class HotkeyListener:
         notify("● Listening...")
 
     def _stop_dictation(self) -> None:
-        result = self._run_control("stop")
+        result = self._run_control("stop", "--no-wait")
         if result.returncode != 0:
             error = result.stderr.strip() or "Dictation stop failed."
             _log(f"Stop failed: {error}")
             notify(error)
-            return
-        # The daemon streams and types each chunk in real-time, so no typing needed here.
 
     def _handle_hotkey_release(self, state: int, keycode: int) -> None:
         now = time.monotonic()
