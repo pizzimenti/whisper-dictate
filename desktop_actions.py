@@ -56,17 +56,17 @@ class DictationNotifier:
 
     def started(self) -> None:
         """New notification for recording start (persistent until replaced)."""
-        self._session_id = _gdbus_notify("🎙️ Listening...", replace_id=0, timeout_ms=0)
+        self._session_id = _gdbus_notify("🎙️ listening...", replace_id=0, timeout_ms=0)
 
     def transcribing(self) -> None:
         """Replace listening with transcribing status (persistent until complete)."""
         if self._session_id:
-            self._session_id = _gdbus_notify("Dictation stopped. 💬 Transcribing...", replace_id=self._session_id, timeout_ms=0)
+            self._session_id = _gdbus_notify("dictation stopped. 💬 transcribing...", replace_id=self._session_id, timeout_ms=0)
 
     def stopped(self) -> None:
         """Replace with completion notice, then let it expire."""
         if self._session_id:
-            _gdbus_notify("Transcription Complete", replace_id=self._session_id)
+            _gdbus_notify("transcription complete", replace_id=self._session_id)
         self._session_id = 0
 
 
