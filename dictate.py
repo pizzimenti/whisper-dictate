@@ -11,9 +11,9 @@ Wayland hotkey listener can coordinate without importing audio or GI bindings.
 Typing can happen here or be delegated to the hotkey listener with
 ``--no-type-output``.
 
-During a PTT session, audio is transcribed in real-time: each utterance chunk
-(committed by a silence gap or max-length limit) is decoded and typed immediately
-rather than waiting for key release.
+During a PTT session, audio is segmented and decoded in real-time (each utterance
+committed by a silence gap or max-length limit), but text is typed in full only
+after the key is released to avoid modifier-key interference.
 """
 
 from __future__ import annotations
