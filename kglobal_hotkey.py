@@ -118,6 +118,9 @@ class HotkeyListener:
         self.args = args
         self.connection = Gio.bus_get_sync(Gio.BusType.SESSION, None)
         self.hotkey_masks = _expand_modifier_masks(args.required_modifier_mask, args.ignored_modifier_mask)
+        # KWin fires one KeyEvent per registered modifier mask, so track physical
+        # key state here to suppress the duplicate events.
+        self._key_held = False
 
     def _call(
         self,
@@ -226,11 +229,17 @@ class HotkeyListener:
             return
 
         if not released:
+            if self._key_held:
+                return
+            self._key_held = True
             _log(f"Hotkey press. state=0x{state:x} keycode={keycode}")
             state_name = self._daemon_state()
             if state_name != "recording":
                 self._start_dictation()
         else:
+            if not self._key_held:
+                return
+            self._key_held = False
             _log(f"Hotkey release. state=0x{state:x} keycode={keycode}")
             state_name = self._daemon_state()
             if state_name == "recording":
