@@ -358,7 +358,6 @@ class DictationDaemon:
             self._transcribing = False
             self._set_runtime_state(STATE_IDLE)
 
-        self._notifier.stopped()
         if text:
             write_last_text(self.runtime_paths.last_text_file, text)
             if self.args.type_output:
@@ -367,6 +366,7 @@ class DictationDaemon:
         else:
             write_last_text(self.runtime_paths.last_text_file, "")
             print("No speech detected.", flush=True)
+        self._notifier.stopped()
 
     def request_start(self) -> None:
         """Queue a non-blocking start request from a signal handler."""
