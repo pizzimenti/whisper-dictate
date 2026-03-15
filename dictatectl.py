@@ -178,8 +178,7 @@ def main() -> int:
         print(str(exc), file=sys.stderr)
         return 1
 
-    print(f"Unknown command: {args.command}", file=sys.stderr)
-    return 1
+    return 0
 
 
 if __name__ == "__main__":

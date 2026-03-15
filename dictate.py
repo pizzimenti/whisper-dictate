@@ -282,10 +282,7 @@ class DictationDaemon:
             self._streamed_text = []
             # Drain any stale audio from a previous session
             while not self._audio_queue.empty():
-                try:
-                    self._audio_queue.get_nowait()
-                except queue.Empty:
-                    break
+                self._audio_queue.get_nowait()
             self._stop_vad.clear()
             self._set_runtime_state(STATE_RECORDING)
             write_last_text(self.runtime_paths.last_text_file, "")

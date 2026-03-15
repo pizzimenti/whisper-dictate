@@ -108,12 +108,6 @@ def parse_args() -> argparse.Namespace:
         default=str(DEFAULT_CONTROL),
         help="Path to dictatectl.py.",
     )
-    parser.add_argument(
-        "--debounce-ms",
-        type=int,
-        default=250,
-        help="Ignore repeated hotkey releases closer together than this window.",
-    )
     return parser.parse_args()
 
 

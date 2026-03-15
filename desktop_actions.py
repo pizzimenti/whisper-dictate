@@ -32,7 +32,9 @@ def _gdbus_notify(message: str, replace_id: int = 0, timeout_ms: int = DEFAULT_N
             start = out.find("uint32 ")
             if start != -1:
                 end = out.find(",", start)
-                return int(out[start + 7 : end])
+                id_str = out[start + 7 : end if end != -1 else None].strip()
+                if id_str.isdigit():
+                    return int(id_str)
     except Exception:  # noqa: BLE001
         pass
     return 0
