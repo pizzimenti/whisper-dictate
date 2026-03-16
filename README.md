@@ -146,6 +146,46 @@ Run the curated sweep with:
 .venv/bin/python eval/sweep.py --samples 20 --tag myrun
 ```
 
+List available sweep presets with:
+
+```bash
+.venv/bin/python eval/sweep.py --list-presets
+```
+
+Run the direct large-model accuracy bakeoff with:
+
+```bash
+.venv/bin/python eval/sweep.py --preset accuracy-bakeoff --samples 20 --tag accuracy_bakeoff
+```
+
+That preset compares:
+
+- `whisper-large-v3`
+- `whisper-large-v3-turbo`
+- `distil-large-v3.5`
+
+using the repo's current short-form dictation-oriented decode defaults.
+
+If those models are not converted locally yet, prepare them with:
+
+```bash
+python prepare_model.py --model-id openai/whisper-large-v3 --output-dir models/whisper-large-v3-ct2
+python prepare_model.py --model-id openai/whisper-large-v3-turbo --output-dir models/whisper-large-v3-turbo-ct2
+python prepare_model.py --model-id distil-whisper/distil-large-v3.5 --output-dir models/distil-large-v3.5-ct2
+```
+
+If you specifically just need `distil-large-v3.5`, the command is:
+
+```bash
+python prepare_model.py --model-id distil-whisper/distil-large-v3.5 --output-dir models/distil-large-v3.5-ct2
+```
+
+For a very verbose real-time comparison that prints every emitted segment, per-sample WER/RTF, and a final leaderboard as it runs:
+
+```bash
+.venv/bin/python eval/verbose_benchmark.py --preset accuracy-bakeoff --samples 20 --tag watch_live
+```
+
 Each sweep writes `summary.json`, `leaderboard.csv`, `leaderboard.md`, and one JSON per config under `eval/results/sweeps/<timestamp>_<tag>/`. Those per-config JSON files include the model/settings used plus the reference and hypothesis for every audio file.
 
 Local March 11, 2026 results on the bundled 20-sample LibriSpeech set:

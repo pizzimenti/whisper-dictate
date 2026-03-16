@@ -23,7 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from runtime_profile import recommended_cpu_threads, resolve_runtime, set_thread_env
+from runtime_profile import recommended_cpu_threads, recommended_shortform_cpu_threads, resolve_runtime, set_thread_env
 from whisper_common import load_whisper_model
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -56,6 +56,16 @@ def parse_args() -> argparse.Namespace:
         help="Directory where timestamped sweep results are written.",
     )
     parser.add_argument("--tag", default=None, help="Optional suffix for the timestamped output directory.")
+    parser.add_argument(
+        "--preset",
+        default="default",
+        help="Named config preset to run. Use --list-presets to inspect available presets.",
+    )
+    parser.add_argument(
+        "--list-presets",
+        action="store_true",
+        help="Print available presets and exit.",
+    )
     parser.add_argument(
         "--config-name",
         action="append",
@@ -154,6 +164,64 @@ def default_configs() -> list[RunConfig]:
             vad_filter=True,
         ),
     ]
+
+
+def accuracy_bakeoff_configs() -> list[RunConfig]:
+    shortform_threads = recommended_shortform_cpu_threads()
+    throughput_threads = recommended_cpu_threads()
+    return [
+        RunConfig(
+            name=f"whisper_large_v3_beam1_nots_t{shortform_threads}",
+            model_dir="models/whisper-large-v3-ct2",
+            beam_size=1,
+            cpu_threads=shortform_threads,
+            without_timestamps=True,
+            vad_filter=False,
+        ),
+        RunConfig(
+            name=f"whisper_large_v3_turbo_beam1_nots_t{throughput_threads}",
+            model_dir="models/whisper-large-v3-turbo-ct2",
+            beam_size=1,
+            cpu_threads=throughput_threads,
+            without_timestamps=True,
+            vad_filter=False,
+        ),
+        RunConfig(
+            name=f"distil_large_v3_5_beam1_nots_t{shortform_threads}",
+            model_dir="models/distil-large-v3.5-ct2",
+            beam_size=1,
+            cpu_threads=shortform_threads,
+            without_timestamps=True,
+            vad_filter=False,
+        ),
+    ]
+
+
+PRESET_BUILDERS: dict[str, tuple[str, callable]] = {
+    "default": (
+        "Current curated sweep for the bundled distil-medium defaults and nearby tuning checks.",
+        default_configs,
+    ),
+    "accuracy-bakeoff": (
+        "Direct large-model comparison: whisper-large-v3 vs whisper-large-v3-turbo vs distil-large-v3.5.",
+        accuracy_bakeoff_configs,
+    ),
+}
+
+
+def list_presets() -> None:
+    print("Available presets:")
+    for name, (description, builder) in PRESET_BUILDERS.items():
+        print(f"- {name}: {description}")
+        for config in builder():
+            print(f"    - {config.name}: {config.model_dir}")
+
+
+def configs_for_preset(name: str) -> list[RunConfig]:
+    entry = PRESET_BUILDERS.get(name)
+    if entry is None:
+        raise KeyError(name)
+    return entry[1]()
 
 
 def load_manifest(path: Path, limit: int) -> list[dict]:
@@ -375,6 +443,10 @@ def print_leaderboard(rows: list[dict]) -> None:
 
 def main() -> int:
     args = parse_args()
+    if args.list_presets:
+        list_presets()
+        return 0
+
     manifest_path = Path(args.manifest)
     if not manifest_path.exists():
         print(f"Manifest not found: {manifest_path}", file=sys.stderr)
@@ -393,7 +465,13 @@ def main() -> int:
     output_dir = results_root / output_dir_name
     output_dir.mkdir(parents=True, exist_ok=False)
 
-    configs = default_configs()
+    try:
+        configs = configs_for_preset(args.preset)
+    except KeyError:
+        print(f"Unknown preset: {args.preset}", file=sys.stderr)
+        print("Use --list-presets to inspect supported presets.", file=sys.stderr)
+        return 1
+
     if args.config_name:
         requested = set(args.config_name)
         configs = [config for config in configs if config.name in requested]
@@ -420,6 +498,7 @@ def main() -> int:
     summary_payload = {
         "manifest": str(manifest_path),
         "samples": len(manifest),
+        "preset": args.preset,
         "output_dir": str(output_dir),
         "leaderboard": rows,
         "runs": run_payloads,
