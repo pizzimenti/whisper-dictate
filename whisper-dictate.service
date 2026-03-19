@@ -4,8 +4,8 @@ After=graphical-session.target sound.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/Code/whisper-dictate
-ExecStart=%h/Code/whisper-dictate/.venv/bin/python %h/Code/whisper-dictate/dictate.py --compute-type int8 --cpu-threads 6 --beam-size 1 --vad-filter --no-condition-on-previous-text --no-speech-threshold 0.6 --type-output --energy-threshold 600 --silence-ms 500 --max-utterance-s 8
+WorkingDirectory=@@REPO_DIR@@
+ExecStart=@@REPO_DIR@@/.venv/bin/python @@REPO_DIR@@/dictate.py --compute-type int8 --beam-size 1 --vad-filter --no-condition-on-previous-text --no-speech-threshold 0.6 --type-output --energy-threshold 600 --silence-ms 500 --max-utterance-s 8
 Restart=on-failure
 RestartSec=5
 

@@ -19,7 +19,7 @@ from gi.repository import Gio, GLib
 if TYPE_CHECKING:
     from dictate import DictationDaemon
 
-from dictate_runtime import STATE_IDLE, STATE_RECORDING
+from dictate_runtime import STATE_IDLE, STATE_RECORDING, STATE_TRANSCRIBING
 
 
 DEFAULT_CLIENT_NAME = "org.gnome.Orca.KeyboardMonitor"
@@ -162,17 +162,13 @@ class HotkeyListener:
             return
 
         if not released:
-            if self._key_held:
-                return
-            self._key_held = True
-            _log(f"Hotkey press. state=0x{state:x} keycode={keycode}")
-        else:
-            if not self._key_held:
-                return
-            self._key_held = False
-            _log(f"Hotkey release. state=0x{state:x} keycode={keycode}")
-            daemon_state = self._daemon.state
-            if daemon_state == STATE_IDLE:
-                self._daemon.request_start()
-            elif daemon_state == STATE_RECORDING:
-                self._daemon.request_stop()
+            return
+
+        _log(f"Hotkey release. state=0x{state:x} keycode={keycode}")
+        daemon_state = self._daemon.state
+        if daemon_state == STATE_IDLE:
+            self._daemon.request_start()
+        elif daemon_state == STATE_RECORDING:
+            self._daemon.request_stop()
+        elif daemon_state == STATE_TRANSCRIBING:
+            self._daemon._pending_start.set()

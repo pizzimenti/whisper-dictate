@@ -54,9 +54,10 @@ class DictationNotifier:
     def __init__(self) -> None:
         self._session_id: int = 0
 
-    def started(self) -> None:
+    def started(self, mic_name: str = "") -> None:
         """New notification for recording start (persistent until replaced)."""
-        self._session_id = _gdbus_notify("🎙️ listening...", replace_id=0, timeout_ms=0)
+        msg = f"🎙️ listening on\n{mic_name}" if mic_name else "🎙️ listening..."
+        self._session_id = _gdbus_notify(msg, replace_id=0, timeout_ms=0)
 
     def transcribing(self) -> None:
         """Replace listening with transcribing status (persistent until complete)."""
@@ -73,4 +74,4 @@ class DictationNotifier:
 def type_text(text: str) -> subprocess.CompletedProcess[bytes]:
     """Type text into the current keyboard focus via ydotool."""
 
-    return subprocess.run(["ydotool", "type", "--key-delay", "2", "--key-hold", "2", "--", text], check=False)
+    return subprocess.run(["ydotool", "type", "--key-delay", "25", "--key-hold", "10", "--", text], check=False)

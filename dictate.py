@@ -26,6 +26,8 @@ import threading
 from pathlib import Path
 from typing import Any
 
+import subprocess
+
 import gi
 
 gi.require_version("GLib", "2.0")
@@ -47,6 +49,47 @@ from whisper_common import VADConfig, VADSegmenter, load_whisper_model, transcri
 
 DEFAULT_RUNTIME_PATHS = default_runtime_paths()
 DEFAULT_MODEL_DIR = Path(__file__).parent / "models/whisper-large-v3-turbo-ct2"
+
+
+def _get_default_input_device() -> tuple[str, bool]:
+    """Return (device_description, is_usable) for the default PipeWire/PulseAudio source.
+
+    A source is considered unusable if it is a monitor (output loopback) or if
+    no default source is configured.  The description is a human-friendly name
+    suitable for display in a notification.
+    """
+    try:
+        result = subprocess.run(
+            ["pactl", "get-default-source"],
+            capture_output=True, text=True, timeout=3,
+        )
+        source_name = result.stdout.strip()
+    except Exception:  # noqa: BLE001
+        return ("unknown", False)
+
+    if not source_name:
+        return ("none", False)
+
+    if source_name.endswith(".monitor"):
+        return (source_name, False)
+
+    # Ask pactl for the human-readable description.
+    try:
+        result = subprocess.run(
+            ["pactl", "list", "sources"],
+            capture_output=True, text=True, timeout=3,
+        )
+        in_target = False
+        for line in result.stdout.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("Name:") and stripped.split(None, 1)[1] == source_name:
+                in_target = True
+            elif in_target and stripped.startswith("Description:"):
+                return (stripped.split(":", 1)[1].strip(), True)
+    except Exception:  # noqa: BLE001
+        pass
+
+    return (source_name, True)
 
 
 def parse_args() -> argparse.Namespace:
@@ -204,6 +247,7 @@ class DictationDaemon:
         self._audio_queue: queue.Queue = queue.Queue(maxsize=512)
         self._utterance_queue: queue.Queue = queue.Queue(maxsize=64)
         self._stop_vad = threading.Event()
+        self._pending_start = threading.Event()
         self._vad_thread: threading.Thread | None = None
         self._decode_thread: threading.Thread | None = None
         self._streamed_text: list[str] = []
@@ -278,12 +322,19 @@ class DictationDaemon:
 
         import sounddevice as sd
 
+        mic_name, mic_usable = _get_default_input_device()
+        if not mic_usable:
+            notify(f"no usable microphone ({mic_name})")
+            print(f"No usable input device: {mic_name}", file=sys.stderr, flush=True)
+            return
+
         with self._lock:
             if self._recording:
                 return
             if self._transcribing:
                 return
             self._recording = True
+            self._pending_start.clear()
             self._streamed_text = []
             # Drain any stale audio from a previous session
             while not self._audio_queue.empty():
@@ -329,8 +380,8 @@ class DictationDaemon:
 
             return
 
-        print("Recording started (streaming).", flush=True)
-        self._notifier.started()
+        print(f"Recording started (streaming) — mic: {mic_name}", flush=True)
+        self._notifier.started(mic_name)
 
     def stop_and_transcribe(self) -> None:
         """Stop recording, flush the streaming pipeline, and finalize."""
@@ -385,6 +436,10 @@ class DictationDaemon:
             print("No speech detected.", flush=True)
         self._notifier.stopped()
 
+        if self._pending_start.is_set():
+            self._pending_start.clear()
+            self.request_start()
+
     @property
     def state(self) -> str:
         """Current daemon state, safe to call from any thread."""
@@ -436,7 +491,7 @@ def main() -> int:
         f"cpu_threads={runtime['cpu_threads']}",
         flush=True,
     )
-    notify("Whisper-Dictate ready")
+    notify("dictation ready")
 
     daemon = DictationDaemon(
         args=args,
