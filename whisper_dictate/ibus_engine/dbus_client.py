@@ -214,14 +214,18 @@ class DaemonControlBridge:
         object_path: str = DBUS_OBJECT_PATH,
         interface_name: str = DBUS_INTERFACE,
         bus_type: Gio.BusType = Gio.BusType.SESSION,
-        bus_get_sync: Callable[..., Gio.DBusConnection] | None = None,
+        bus_get: Callable[..., None] | None = None,
+        bus_get_finish: Callable[..., Any] | None = None,
     ) -> None:
         self._logger = logger
         self._bus_name = bus_name
         self._object_path = object_path
         self._interface_name = interface_name
         self._bus_type = bus_type
-        self._bus_get_sync = bus_get_sync or Gio.bus_get_sync
+        # Use fully async bus_get / call so that _call() never blocks the GLib
+        # main loop thread, even when invoked from a GLib.idle_add callback.
+        self._bus_get = bus_get or Gio.bus_get
+        self._bus_get_finish = bus_get_finish or Gio.bus_get_finish
 
     def toggle(self) -> None:
         """Toggle recording state on the daemon."""
@@ -229,9 +233,20 @@ class DaemonControlBridge:
         self._call("Toggle")
 
     def _call(self, method_name: str) -> None:
-        try:
-            connection = self._bus_get_sync(self._bus_type, None)
-            connection.call_sync(
+        def _on_connection(source: Any, result: Any, user_data: object) -> None:
+            try:
+                connection = self._bus_get_finish(result)
+            except Exception as exc:  # noqa: BLE001
+                self._logger.warning("Daemon control call %s: bus_get failed: %s", method_name, exc)
+                return
+
+            def _on_reply(source: Any, result: Any, user_data: object) -> None:
+                try:
+                    connection.call_finish(result)
+                except Exception as exc:  # noqa: BLE001
+                    self._logger.warning("Daemon control call %s failed: %s", method_name, exc)
+
+            connection.call(
                 self._bus_name,
                 self._object_path,
                 self._interface_name,
@@ -241,6 +256,8 @@ class DaemonControlBridge:
                 Gio.DBusCallFlags.NONE,
                 5000,
                 None,
+                _on_reply,
+                None,
             )
-        except Exception as exc:  # noqa: BLE001
-            self._logger.warning("Daemon control call %s failed: %s", method_name, exc)
+
+        self._bus_get(self._bus_type, None, _on_connection, None)

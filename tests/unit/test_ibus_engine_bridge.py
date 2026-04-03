@@ -132,9 +132,18 @@ class DaemonControlBridgeTest(unittest.TestCase):
     def test_toggle_invokes_session_bus_method(self) -> None:
         logger = logging.getLogger("whisper_dictate.tests")
         connection = FakeConnection()
+
+        # Fake async bus_get: immediately invokes the callback with the connection.
+        def fake_bus_get(bus_type, cancellable, callback, user_data):
+            callback(None, _FakeAsyncResult(connection), user_data)
+
+        def fake_bus_get_finish(result):
+            return result.result
+
         bridge = DaemonControlBridge(
             logger,
-            bus_get_sync=lambda *_args: connection,
+            bus_get=fake_bus_get,
+            bus_get_finish=fake_bus_get_finish,
         )
 
         bridge.toggle()
