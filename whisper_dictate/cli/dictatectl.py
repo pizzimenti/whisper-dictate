@@ -10,7 +10,7 @@ from typing import Any, Callable, Sequence
 from whisper_dictate.constants import DBUS_BUS_NAME, DBUS_INTERFACE, DBUS_OBJECT_PATH
 from whisper_dictate.exceptions import DbusServiceError
 from whisper_dictate.logging_utils import configure_logging
-from whisper_dictate.runtime import STATE_IDLE, STATE_RECORDING, STATE_STARTING, STATE_TRANSCRIBING
+from whisper_dictate.runtime import STATE_ERROR, STATE_IDLE, STATE_RECORDING, STATE_STARTING, STATE_TRANSCRIBING
 
 
 class DbusControlClient:
@@ -177,6 +177,18 @@ def _wait_for_state(client: DbusControlClient, targets: set[str], timeout: float
     return state if state in targets else None
 
 
+def _wait_for_start_outcome(client: DbusControlClient, timeout: float) -> str | None:
+    import time
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        state = client.get_state()
+        if state in {STATE_RECORDING, STATE_TRANSCRIBING, STATE_IDLE, STATE_ERROR}:
+            return state
+        time.sleep(0.15)
+    return client.get_state()
+
+
 def _handle_start(client: DbusControlClient, timeout: float, wait: bool) -> int:
     state = client.get_state()
     if state in {STATE_RECORDING, STATE_STARTING}:
@@ -189,12 +201,21 @@ def _handle_start(client: DbusControlClient, timeout: float, wait: bool) -> int:
     if not wait:
         print("starting")
         return 0
-    new_state = _wait_for_state(client, {STATE_RECORDING, STATE_TRANSCRIBING}, timeout)
+    new_state = _wait_for_start_outcome(client, timeout)
+    if new_state in {STATE_RECORDING, STATE_TRANSCRIBING}:
+        print(new_state)
+        return 0
+    if new_state == STATE_ERROR:
+        print("Recording failed to start.", file=sys.stderr)
+        return 1
+    if new_state == STATE_IDLE:
+        print("Recording failed to start.", file=sys.stderr)
+        return 1
     if new_state is None:
         print("Timed out waiting for recording to start.", file=sys.stderr)
         return 1
-    print(new_state)
-    return 0
+    print(f"Unexpected daemon state while starting: {new_state}", file=sys.stderr)
+    return 1
 
 
 def _handle_stop(client: DbusControlClient, timeout: float, wait: bool) -> int:

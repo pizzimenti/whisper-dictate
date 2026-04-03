@@ -243,6 +243,16 @@ class DictationDaemon:
             self._handles.vad_thread = None
             self._handles.decode_thread = None
 
+    def _cancel_pending_start(self) -> None:
+        """Tear down a startup attempt that was cancelled before recording went live."""
+
+        self._cleanup_start_handles()
+        with self._lock:
+            self._starting = False
+            self._cancel_start.clear()
+        self._logger.info("recording start cancelled before activation")
+        self._write_state(STATE_IDLE)
+
     def _build_stream(self) -> Any:
         """Build the input stream using the configured or default factory."""
 
@@ -384,25 +394,22 @@ class DictationDaemon:
             stream = self._build_stream()
             self._handles.stream = stream
             if self._cancel_start.is_set():
-                self._cleanup_start_handles()
-                with self._lock:
-                    self._starting = False
-                    self._cancel_start.clear()
-                self._logger.info("recording start cancelled before activation")
-                self._write_state(STATE_IDLE)
+                self._cancel_pending_start()
                 return
             stream.start()
             if self._cancel_start.is_set():
-                self._cleanup_start_handles()
-                with self._lock:
-                    self._starting = False
-                    self._cancel_start.clear()
-                self._logger.info("recording start cancelled before activation")
-                self._write_state(STATE_IDLE)
+                self._cancel_pending_start()
                 return
             with self._lock:
-                self._recording = True
-                self._starting = False
+                if self._cancel_start.is_set():
+                    self._starting = False
+                    self._recording = False
+                else:
+                    self._recording = True
+                    self._starting = False
+            if self._cancel_start.is_set():
+                self._cancel_pending_start()
+                return
             write_last_text(self.runtime_paths.last_text_file, "")
             self._write_state(STATE_RECORDING)
             self._logger.info("recording started on %s", mic_name)

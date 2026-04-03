@@ -61,6 +61,16 @@ class _BlockingStartStream(_DummyStream):
         super().start()
 
 
+class _CancelOnStartStream(_DummyStream):
+    def __init__(self, daemon: DictationDaemon) -> None:
+        super().__init__()
+        self._daemon = daemon
+
+    def start(self) -> None:
+        self._daemon._cancel_start.set()
+        super().start()
+
+
 class _DummyThread:
     def __init__(self) -> None:
         self.join_timeouts: list[float | None] = []
@@ -238,6 +248,30 @@ class DictationDaemonTest(unittest.TestCase):
             self.assertTrue(stream.started)
             self.assertTrue(stream.stopped)
             self.assertTrue(stream.closed)
+            self.assertNotIn(("state", STATE_RECORDING), sink.events)
+
+    def test_cancel_after_stream_start_does_not_enter_recording(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runtime_paths = RuntimePaths(
+                state_file=Path(tmpdir) / "state",
+                last_text_file=Path(tmpdir) / "last",
+            )
+            sink = _RecordingEventSink(events=[])
+            daemon = DictationDaemon(
+                _make_config(runtime_paths),
+                model=object(),
+                runtime_paths=runtime_paths,
+                event_sink=sink,
+                stream_factory=lambda **kwargs: _CancelOnStartStream(daemon),
+                input_device_resolver=lambda: ("microphone", True),
+            )
+            daemon._vad_worker = lambda: None  # type: ignore[method-assign]
+            daemon._decode_worker = lambda: None  # type: ignore[method-assign]
+
+            daemon._run_start_session()
+
+            self.assertEqual(daemon.get_state(), STATE_IDLE)
+            self.assertEqual(read_state(runtime_paths.state_file), STATE_IDLE)
             self.assertNotIn(("state", STATE_RECORDING), sink.events)
 
     def test_stop_waits_for_decode_worker_without_timeout(self) -> None:
