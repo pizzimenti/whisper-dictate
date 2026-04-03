@@ -1,4 +1,4 @@
-"""Session D-Bus bridge for daemon transcript events."""
+"""Session D-Bus bridge for daemon transcript events and control calls."""
 
 from __future__ import annotations
 
@@ -190,3 +190,46 @@ class DaemonSignalBridge:
             self._controller.handle_error(str(values[0]), str(values[1]))
         else:
             self._logger.warning("Ignoring malformed daemon signal %s with payload %r", signal_name, values)
+
+
+class DaemonControlBridge:
+    """Issue control requests to the daemon over the session bus."""
+
+    def __init__(
+        self,
+        logger: logging.Logger,
+        *,
+        bus_name: str = DBUS_BUS_NAME,
+        object_path: str = DBUS_OBJECT_PATH,
+        interface_name: str = DBUS_INTERFACE,
+        bus_type: Gio.BusType = Gio.BusType.SESSION,
+        bus_get_sync: Callable[..., Gio.DBusConnection] | None = None,
+    ) -> None:
+        self._logger = logger
+        self._bus_name = bus_name
+        self._object_path = object_path
+        self._interface_name = interface_name
+        self._bus_type = bus_type
+        self._bus_get_sync = bus_get_sync or Gio.bus_get_sync
+
+    def toggle(self) -> None:
+        """Toggle recording state on the daemon."""
+
+        self._call("Toggle")
+
+    def _call(self, method_name: str) -> None:
+        try:
+            connection = self._bus_get_sync(self._bus_type, None)
+            connection.call_sync(
+                self._bus_name,
+                self._object_path,
+                self._interface_name,
+                method_name,
+                None,
+                None,
+                Gio.DBusCallFlags.NONE,
+                5000,
+                None,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._logger.warning("Daemon control call %s failed: %s", method_name, exc)

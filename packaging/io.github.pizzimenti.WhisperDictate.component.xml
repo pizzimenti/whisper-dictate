@@ -3,7 +3,7 @@
   <name>io.github.pizzimenti.WhisperDictate</name>
   <description>Whisper Dictate IBus component metadata</description>
   <exec>@@ENGINE_EXEC@@</exec>
-  <version>1.0</version>
+  <version>0.3</version>
   <author>Bradley Pizzimenti</author>
   <license>MIT</license>
   <homepage>https://github.com/pizzimenti/whisper-dictate</homepage>
@@ -23,7 +23,7 @@
       <hotkeys></hotkeys>
       <symbol></symbol>
       <setup></setup>
-      <version>1.0</version>
+      <version>0.3</version>
       <textdomain>whisper-dictate</textdomain>
       <icon_prop_key></icon_prop_key>
       <rank>1</rank>

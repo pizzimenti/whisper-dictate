@@ -44,7 +44,7 @@ On Arch/Manjaro, `install.sh` handles the bootstrap path automatically:
 bash install.sh
 ```
 
-It installs `ibus`, sets up the Python environment, registers the `io.github.pizzimenti.WhisperDictate.service` systemd user unit, installs the D-Bus activation file, places the IBus component metadata under the current user's data directory, writes `~/.config/environment.d/60-whisper-dictate-ibus.conf` so IBus can scan that per-user component directory, and installs the IBus engine launcher at `~/.local/bin/ibus-engine-whisper-dictate`.
+It installs `ibus`, sets up the Python environment, registers the `io.github.pizzimenti.WhisperDictate.service` systemd user unit, installs the D-Bus activation file, places the IBus component metadata under the current user's data directory, writes `~/.config/environment.d/60-whisper-dictate-ibus.conf` so IBus can scan that per-user component directory, keeps `XMODIFIERS=@im=ibus` for XWayland/X11 compatibility, installs `~/.config/plasma-workspace/env/whisper-dictate-plasma-wayland.sh` to unset `GTK_IM_MODULE` and `QT_IM_MODULE` during Plasma Wayland startup, installs the IBus engine launcher at `~/.local/bin/ibus-engine-whisper-dictate`, installs a hidden KDE launcher for `dictatectl.py toggle --no-wait`, configures Plasma's KWin Wayland input method in `~/.config/kwinrc` to use the installed `IBus Wayland` desktop file, refreshes the IBus cache, and restarts `ibus-daemon` for the current session.
 
 To start the daemon manually instead:
 
@@ -80,7 +80,8 @@ After the IBus frontend is installed, enable it the same way you would any other
 3. Select it in the input method switcher when you want dictation text to flow into the focused application.
 
 The daemon never inserts text directly. Partial transcript should appear as preedit and final transcript should be committed by the IBus frontend only.
-If the engine does not appear immediately after install, restart IBus or sign out and back in so the new component metadata is reloaded.
+If the engine still does not appear immediately after install, or if text fields do not accept dictation commits, sign out and back in once so the desktop session reloads the updated input-method environment and KWin picks up the configured IBus Wayland input method. On Plasma Wayland, `GTK_IM_MODULE` and `QT_IM_MODULE` should remain unset in the desktop session; the compositor-backed `IBus Wayland` path handles native Wayland clients.
+On KDE Plasma, `io.github.pizzimenti.WhisperDictateToggle.desktop` can be bound as a global shortcut to run `dictatectl.py toggle --no-wait`, which is the most reliable way to keep `Ctrl+Space` working as a dictation toggle.
 
 ## Architecture
 

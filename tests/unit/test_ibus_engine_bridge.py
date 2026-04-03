@@ -5,7 +5,7 @@ import unittest
 
 from whisper_dictate.constants import STATE_RECORDING
 from whisper_dictate.ibus_engine.controller import DictationEngineController
-from whisper_dictate.ibus_engine.dbus_client import DaemonSignalBridge
+from whisper_dictate.ibus_engine.dbus_client import DaemonControlBridge, DaemonSignalBridge
 
 
 class FakeVariant:
@@ -110,6 +110,21 @@ class DaemonSignalBridgeTest(unittest.TestCase):
         self.assertEqual(self.bridge._watch_id, 42)
         self.bridge.stop()
         self.assertIsNone(self.bridge._watch_id)
+
+
+class DaemonControlBridgeTest(unittest.TestCase):
+    def test_toggle_invokes_session_bus_method(self) -> None:
+        logger = logging.getLogger("whisper_dictate.tests")
+        connection = FakeConnection()
+        bridge = DaemonControlBridge(
+            logger,
+            bus_get_sync=lambda *_args: connection,
+        )
+
+        bridge.toggle()
+
+        self.assertEqual(connection.calls[0][2], "io.github.pizzimenti.WhisperDictate1")
+        self.assertEqual(connection.calls[0][3], "Toggle")
 
 
 if __name__ == "__main__":

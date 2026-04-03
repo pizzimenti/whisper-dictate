@@ -4,16 +4,26 @@ from __future__ import annotations
 
 import logging
 from types import ModuleType
-from typing import Any, Callable
+from typing import Any
 
-from whisper_dictate.constants import DBUS_BUS_NAME, DBUS_INTERFACE
+from whisper_dictate.constants import APP_ROOT_ID, DBUS_BUS_NAME, DBUS_INTERFACE
 from whisper_dictate.exceptions import IbusEngineError
 from whisper_dictate.logging_utils import configure_logging
 from whisper_dictate.ibus_engine.controller import DictationEngineController, EngineAdapter
-from whisper_dictate.ibus_engine.dbus_client import DaemonSignalBridge
+from whisper_dictate.ibus_engine.dbus_client import DaemonControlBridge, DaemonSignalBridge
 
+COMPONENT_NAME = APP_ROOT_ID
 ENGINE_NAME = DBUS_INTERFACE
 ENGINE_OBJECT_PATH = "/io/github/pizzimenti/WhisperDictate1/engine"
+ENGINE_DESCRIPTION = "Session D-Bus driven dictation engine"
+ENGINE_LONGNAME = "Whisper Dictate"
+ENGINE_LANGUAGE = "en"
+ENGINE_LICENSE = "MIT"
+ENGINE_AUTHOR = "Bradley Pizzimenti"
+ENGINE_ICON = "audio-input-microphone"
+ENGINE_LAYOUT = "default"
+ENGINE_VERSION = "0.3"
+ENGINE_TEXTDOMAIN = "whisper-dictate"
 LOGGER_NAME = "whisper_dictate.ibus"
 
 
@@ -52,6 +62,17 @@ class _IbusRenderAdapter:
         self._engine.commit_text(self._ibus.Text.new_from_string(text))
 
 
+def is_toggle_shortcut(keyval: int, state: int, ibus_module: ModuleType | None = None) -> bool:
+    """Return whether the key event should toggle dictation."""
+
+    ibus = ibus_module or load_ibus_module()
+    if keyval != ibus.KEY_space:
+        return False
+    if state & ibus.ModifierType.RELEASE_MASK:
+        return False
+    return bool(state & ibus.ModifierType.CONTROL_MASK)
+
+
 def create_ibus_engine_class(ibus_module: ModuleType | None = None) -> type[Any]:
     """Create the concrete IBus.Engine subclass used by ibus-daemon."""
 
@@ -67,6 +88,7 @@ def create_ibus_engine_class(ibus_module: ModuleType | None = None) -> type[Any]
             self._adapter = _IbusRenderAdapter(self, ibus)
             self._controller = DictationEngineController(self._adapter, self._logger)
             self._bridge = DaemonSignalBridge(self._controller, self._logger)
+            self._control = DaemonControlBridge(self._logger)
             self._bridge.start()
             self._logger.info(
                 "IBus engine initialized for daemon bus %s at object path %s",
@@ -91,6 +113,14 @@ def create_ibus_engine_class(ibus_module: ModuleType | None = None) -> type[Any]
 
         def do_set_surrounding_text(self, text: Any, cursor_pos: int, anchor_pos: int) -> None:
             self._controller.set_surrounding_text(_coerce_text(text), cursor_pos, anchor_pos)
+
+        def do_process_key_event(self, keyval: int, keycode: int, state: int) -> bool:
+            del keycode
+            if is_toggle_shortcut(keyval, state, ibus):
+                self._logger.info("Ctrl+Space received by IBus engine; toggling daemon recording")
+                self._control.toggle()
+                return True
+            return False
 
         def do_destroy(self) -> None:
             self._bridge.stop()
@@ -119,15 +149,60 @@ def create_engine_instance(engine_name: str = ENGINE_NAME, object_path: str = EN
         raise IbusEngineError(f"Unable to create IBus engine instance: {exc}") from exc
 
 
-def build_engine_factory() -> Any:
+def build_engine_factory(bus: Any | None = None, ibus_module: ModuleType | None = None) -> Any:
     """Build an IBus factory that can construct the whisper-dictate engine."""
 
-    ibus = load_ibus_module()
+    ibus = ibus_module or load_ibus_module()
     engine_type = create_ibus_engine_class(ibus)
-    bus = ibus.Bus.new()
-    factory = ibus.Factory.new(bus.get_connection())
+    active_bus = bus or ibus.Bus.new()
+    try:
+        factory = ibus.Factory(bus=active_bus)
+    except TypeError:
+        factory = ibus.Factory.new(active_bus.get_connection())
+    object_path = getattr(factory, "get_object_path", None)
+    if callable(object_path):
+        active_path = object_path()
+        expected_path = getattr(ibus, "PATH_FACTORY", None)
+        if expected_path is not None and active_path != expected_path:
+            raise IbusEngineError(
+                f"IBus factory exported unexpected object path {active_path!r}; expected {expected_path!r}"
+            )
     factory.add_engine(ENGINE_NAME, engine_type.__gtype__)
     return factory
+
+
+def claim_component_name(bus: Any, ibus_module: ModuleType | None = None) -> int:
+    """Claim the installed component name for the ibus-daemon launched engine."""
+
+    ibus = ibus_module or load_ibus_module()
+    request_name = getattr(bus, "request_name", None)
+    if not callable(request_name):
+        raise IbusEngineError("The IBus bus object does not support request_name()")
+
+    result = request_name(COMPONENT_NAME, 0)
+    if result not in {
+        ibus.BusRequestNameReply.PRIMARY_OWNER,
+        ibus.BusRequestNameReply.ALREADY_OWNER,
+    }:
+        raise IbusEngineError(f"Unable to claim IBus component name {COMPONENT_NAME!r}")
+    return int(result)
+
+
+def initialize_engine_runtime(
+    executable_path: str,
+    ibus_module: ModuleType | None = None,
+) -> tuple[Any, Any]:
+    """Connect to IBus and export the factory for the installed engine path."""
+
+    del executable_path
+    ibus = ibus_module or load_ibus_module()
+    bus = ibus.Bus.new()
+    if not bus.is_connected():
+        raise IbusEngineError("Unable to connect to the IBus bus")
+
+    factory = build_engine_factory(bus=bus, ibus_module=ibus)
+    claim_component_name(bus, ibus_module=ibus)
+    return bus, factory
 
 
 def _coerce_text(text: Any) -> str:

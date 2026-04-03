@@ -13,20 +13,20 @@ from gi.repository import GLib
 
 from whisper_dictate.exceptions import IbusEngineError
 from whisper_dictate.logging_utils import configure_logging
-from whisper_dictate.ibus_engine.engine import ENGINE_NAME, build_engine_factory, load_ibus_module
+from whisper_dictate.ibus_engine.engine import ENGINE_NAME, initialize_engine_runtime, load_ibus_module
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the IBus engine main loop."""
 
-    del argv
     logger = configure_logging("whisper_dictate.ibus")
     logger.info("Starting IBus engine process for %s", ENGINE_NAME)
 
+    executable_path = argv[0] if argv else sys.argv[0]
     try:
         ibus = load_ibus_module()
         ibus.init()
-        factory = build_engine_factory()
+        bus, factory = initialize_engine_runtime(executable_path, ibus_module=ibus)
     except IbusEngineError as exc:
         logger.error("IBus engine startup failed: %s", exc)
         print(str(exc), file=sys.stderr)
@@ -43,6 +43,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     except KeyboardInterrupt:
         logger.info("IBus engine interrupted")
     finally:
+        del bus
+        destroy = getattr(factory, "destroy", None)
+        if callable(destroy):
+            destroy()
         del factory
         del ibus
 
