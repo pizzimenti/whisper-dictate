@@ -22,8 +22,8 @@ if [[ -n "${PKEXEC_UID:-}" ]]; then
     export HOME
 fi
 
-echo "==> Installing wtype and wl-clipboard"
-pacman -S --noconfirm --needed wtype wl-clipboard
+echo "==> Installing wl-clipboard"
+pacman -S --noconfirm --needed wl-clipboard
 
 echo "==> Creating Python virtual environment"
 run_as_user python3 -m venv "$SCRIPT_DIR/.venv"

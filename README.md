@@ -44,7 +44,7 @@ On Arch/Manjaro, `install.sh` handles everything automatically:
 bash install.sh
 ```
 
-It installs `wtype` and `wl-clipboard`, sets up the Python environment, and registers the `whisper-dictate` systemd user service.
+It installs `wl-clipboard`, sets up the Python environment, and registers the `whisper-dictate` systemd user service.
 
 To start the daemon manually instead:
 
@@ -66,7 +66,7 @@ The hotkey listener grabs `Ctrl+Space` directly through KWin's accessibility key
 - stops dictation on the next press
 - attempts to type the transcript into the current keyboard focus
 
-There is no AT-SPI cursor/editability gate anymore. If the current target cannot accept typed text, the transcript is still saved in the daemon runtime files and a clipboard paste (`wl-copy` + `wtype` Ctrl+V) is simply attempted against whatever currently has keyboard focus.
+There is no AT-SPI cursor/editability gate anymore. If the current target cannot accept typed text, the transcript is still saved in the daemon runtime files and copied to the Wayland clipboard via `wl-copy` for manual paste.
 
 KWin currently restricts that keyboard-monitor interface to the screen-reader bus name `org.gnome.Orca.KeyboardMonitor`, so `whisper-dictate-hotkey.service` owns that name while it runs. If you use Orca, stop the hotkey service first or the listener will fail to start.
 

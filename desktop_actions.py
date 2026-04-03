@@ -71,6 +71,5 @@ class DictationNotifier:
 
 
 def type_text(text: str) -> None:
-    """Paste text into the focused window via Wayland clipboard."""
+    """Copy text to the Wayland clipboard for manual paste."""
     subprocess.run(["wl-copy", "--", text], check=True, timeout=3)
-    subprocess.run(["wtype", "-M", "ctrl", "-k", "v"], check=False, timeout=3)
