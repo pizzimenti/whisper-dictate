@@ -44,7 +44,7 @@ On Arch/Manjaro, `install.sh` handles the bootstrap path automatically:
 bash install.sh
 ```
 
-It installs `ibus`, sets up the Python environment, registers the `io.github.pizzimenti.WhisperDictate.service` systemd user unit, installs the D-Bus activation file, places the IBus component metadata under the current user's data directory, and installs the IBus engine launcher at `~/.local/bin/ibus-engine-whisper-dictate`.
+It installs `ibus`, sets up the Python environment, registers the `io.github.pizzimenti.WhisperDictate.service` systemd user unit, installs the D-Bus activation file, places the IBus component metadata under the current user's data directory, writes `~/.config/environment.d/60-whisper-dictate-ibus.conf` so IBus can scan that per-user component directory, and installs the IBus engine launcher at `~/.local/bin/ibus-engine-whisper-dictate`.
 
 To start the daemon manually instead:
 

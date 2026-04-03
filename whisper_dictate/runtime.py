@@ -10,16 +10,19 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
+from whisper_dictate.constants import (
+    STATE_ERROR,
+    STATE_IDLE,
+    STATE_RECORDING,
+    STATE_STARTING,
+    STATE_TRANSCRIBING,
+)
 from whisper_dictate.exceptions import WhisperDictateError
 
 
 DAEMON_PGREP_PATTERN = r"python.*dictate\.py"
 DEFAULT_STATE_POLL_INTERVAL_S = 0.15
 
-STATE_IDLE = "idle"
-STATE_RECORDING = "recording"
-STATE_TRANSCRIBING = "transcribing"
-STATE_ERROR = "error"
 STATE_MISSING = "missing"
 
 

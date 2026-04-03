@@ -8,7 +8,6 @@ set -euo pipefail
 # - dictate.py
 # - dictatectl.py
 # - dictate_runtime.py
-# - desktop_actions.py
 # - systemd/**
 # - packaging/**
 
@@ -20,7 +19,6 @@ active_paths=(
   "$repo_dir/dictate.py"
   "$repo_dir/dictatectl.py"
   "$repo_dir/dictate_runtime.py"
-  "$repo_dir/desktop_actions.py"
   "$repo_dir/systemd"
   "$repo_dir/packaging"
 )

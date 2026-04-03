@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import whisper_dictate.core.daemon as daemon_module
 from whisper_dictate.config import DictationConfig
-from whisper_dictate.constants import STATE_ERROR, STATE_IDLE, STATE_RECORDING, STATE_TRANSCRIBING
+from whisper_dictate.constants import STATE_ERROR, STATE_IDLE, STATE_RECORDING, STATE_STARTING, STATE_TRANSCRIBING
 from whisper_dictate.core.daemon import DictationDaemon
 from whisper_dictate.runtime import RuntimePaths, read_last_text, read_state
 
@@ -127,6 +127,7 @@ class DictationDaemonTest(unittest.TestCase):
             self.assertTrue(stream.closed)
             self.assertEqual(read_state(runtime_paths.state_file), STATE_IDLE)
             self.assertEqual(read_last_text(runtime_paths.last_text_file), "hello")
+            self.assertIn(("state", STATE_STARTING), sink.events)
             self.assertIn(("state", STATE_RECORDING), sink.events)
             self.assertIn(("state", STATE_TRANSCRIBING), sink.events)
             self.assertIn(("state", STATE_IDLE), sink.events)
@@ -153,6 +154,7 @@ class DictationDaemonTest(unittest.TestCase):
 
             self.assertEqual(daemon.get_state(), STATE_IDLE)
             self.assertEqual(read_state(runtime_paths.state_file), STATE_IDLE)
+            self.assertIn(("state", STATE_STARTING), sink.events)
             self.assertNotIn(("state", STATE_RECORDING), sink.events)
             self.assertIn(("state", STATE_ERROR), sink.events)
             self.assertIn(("state", STATE_IDLE), sink.events)

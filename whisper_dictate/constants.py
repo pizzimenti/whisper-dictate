@@ -10,12 +10,14 @@ DBUS_OBJECT_PATH: Final[str] = "/io/github/pizzimenti/WhisperDictate1"
 DBUS_INTERFACE: Final[str] = f"{APP_ROOT_ID}1"
 
 STATE_IDLE: Final[str] = "idle"
+STATE_STARTING: Final[str] = "starting"
 STATE_RECORDING: Final[str] = "recording"
 STATE_TRANSCRIBING: Final[str] = "transcribing"
 STATE_ERROR: Final[str] = "error"
 
 CANONICAL_STATES: Final[tuple[str, ...]] = (
     STATE_IDLE,
+    STATE_STARTING,
     STATE_RECORDING,
     STATE_TRANSCRIBING,
     STATE_ERROR,

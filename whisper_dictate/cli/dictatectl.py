@@ -10,7 +10,7 @@ from typing import Any, Callable, Sequence
 from whisper_dictate.constants import DBUS_BUS_NAME, DBUS_INTERFACE, DBUS_OBJECT_PATH
 from whisper_dictate.exceptions import DbusServiceError
 from whisper_dictate.logging_utils import configure_logging
-from whisper_dictate.runtime import STATE_IDLE, STATE_RECORDING, STATE_TRANSCRIBING
+from whisper_dictate.runtime import STATE_IDLE, STATE_RECORDING, STATE_STARTING, STATE_TRANSCRIBING
 
 
 class DbusControlClient:
@@ -179,8 +179,8 @@ def _wait_for_state(client: DbusControlClient, targets: set[str], timeout: float
 
 def _handle_start(client: DbusControlClient, timeout: float, wait: bool) -> int:
     state = client.get_state()
-    if state == STATE_RECORDING:
-        print(STATE_RECORDING)
+    if state in {STATE_RECORDING, STATE_STARTING}:
+        print(state)
         return 0
     if state == STATE_TRANSCRIBING:
         print(STATE_TRANSCRIBING, file=sys.stderr)
@@ -201,6 +201,16 @@ def _handle_stop(client: DbusControlClient, timeout: float, wait: bool) -> int:
     state = client.get_state()
     if state == STATE_IDLE:
         return _print_last_text(client.get_last_text())
+    if state == STATE_STARTING:
+        client.stop()
+        if not wait:
+            print("stopping")
+            return 0
+        new_state = _wait_for_state(client, {STATE_IDLE}, timeout)
+        if new_state is None:
+            print("Timed out waiting for startup cancellation.", file=sys.stderr)
+            return 1
+        return _print_last_text(client.get_last_text())
     client.stop()
     if not wait:
         print("stopping")
@@ -214,7 +224,7 @@ def _handle_stop(client: DbusControlClient, timeout: float, wait: bool) -> int:
 
 def _handle_toggle(client: DbusControlClient, timeout: float, wait: bool) -> int:
     state = client.get_state()
-    if state == STATE_RECORDING:
+    if state in {STATE_RECORDING, STATE_STARTING}:
         return _handle_stop(client, timeout, wait)
     if state == STATE_TRANSCRIBING:
         client.toggle()

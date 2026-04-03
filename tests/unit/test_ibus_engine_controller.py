@@ -106,6 +106,18 @@ class DictationEngineControllerTest(unittest.TestCase):
         self.assertEqual(self.controller.state.daemon_state, STATE_ERROR)
         self.assertIn(("update_preedit", "", False, "clear"), self.adapter.actions)
 
+    def test_final_transcript_commits_after_state_transitions_to_idle(self) -> None:
+        self.controller.set_daemon_available(True)
+        self.controller.handle_state_changed(STATE_RECORDING)
+        self.controller.enable()
+        self.controller.focus_in()
+        self.controller.handle_partial_transcript("hello world")
+
+        self.controller.handle_state_changed(STATE_IDLE)
+        self.controller.handle_final_transcript("hello world")
+
+        self.assertIn(("commit_text", "hello world"), self.adapter.actions)
+
     def test_focus_out_clears_preedit(self) -> None:
         self.controller.set_daemon_available(True)
         self.controller.handle_state_changed(STATE_RECORDING)

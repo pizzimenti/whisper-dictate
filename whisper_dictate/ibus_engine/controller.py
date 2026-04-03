@@ -10,6 +10,7 @@ from whisper_dictate.constants import (
     STATE_ERROR,
     STATE_IDLE,
     STATE_RECORDING,
+    STATE_STARTING,
     STATE_TRANSCRIBING,
 )
 
@@ -126,7 +127,7 @@ class DictationEngineController:
     def handle_state_changed(self, state: str) -> None:
         """Apply a daemon state transition."""
 
-        if state not in {STATE_IDLE, STATE_RECORDING, STATE_TRANSCRIBING, STATE_ERROR}:
+        if state not in {STATE_IDLE, STATE_STARTING, STATE_RECORDING, STATE_TRANSCRIBING, STATE_ERROR}:
             self._logger.warning("Ignoring unknown daemon state %r", state)
             self._state.daemon_state = STATE_ERROR
             self._clear_preedit(reason="invalid-state")
@@ -136,7 +137,7 @@ class DictationEngineController:
         self._state.daemon_state = state
         self._logger.info("Daemon state changed: %s -> %s", previous, state)
 
-        if state == STATE_IDLE or state == STATE_ERROR:
+        if state in {STATE_IDLE, STATE_STARTING, STATE_ERROR}:
             self._state.pending_partial = ""
             self._clear_preedit(reason=f"state-{state}")
             return
@@ -225,7 +226,7 @@ class DictationEngineController:
         )
 
     def _can_commit_final(self) -> bool:
-        return self._can_render_live_text()
+        return self._state.enabled and self._state.focused and self._state.daemon_available
 
     def _sync_preedit(self, *, reason: str) -> None:
         if self._state.pending_partial and self._can_render_live_text():

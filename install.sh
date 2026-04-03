@@ -8,6 +8,8 @@ DBUS_SERVICE_NAME="io.github.pizzimenti.WhisperDictate1.service"
 IBUS_COMPONENT_NAME="io.github.pizzimenti.WhisperDictate.component.xml"
 ENGINE_LAUNCHER_NAME="ibus-engine-whisper-dictate"
 ENGINE_LAUNCHER_TEMPLATE="${SCRIPT_DIR}/packaging/${ENGINE_LAUNCHER_NAME}"
+IBUS_ENV_FILE_NAME="60-whisper-dictate-ibus.conf"
+IBUS_ENV_TEMPLATE="${SCRIPT_DIR}/packaging/${IBUS_ENV_FILE_NAME}"
 
 log() {
     printf '%s\n' "==> $*"
@@ -38,7 +40,7 @@ install_rendered_file() {
 
     parent_dir="$(dirname "$destination_file")"
     run_as_user mkdir -p "$parent_dir"
-    run_as_user bash -lc "sed -e 's|@@REPO_DIR@@|${REPO_DIR_ESCAPED}|g' -e 's|@@ENGINE_EXEC@@|${ENGINE_EXEC_ESCAPED}|g' '$source_file' > '$destination_file'"
+    run_as_user bash -lc "sed -e 's|@@REPO_DIR@@|${REPO_DIR_ESCAPED}|g' -e 's|@@ENGINE_EXEC@@|${ENGINE_EXEC_ESCAPED}|g' -e 's|@@HOME@@|${HOME_ESCAPED}|g' '$source_file' > '$destination_file'"
     run_as_user chmod "$mode" "$destination_file"
 }
 
@@ -64,6 +66,7 @@ fi
 ENGINE_LAUNCHER_PATH="${HOME}/.local/bin/${ENGINE_LAUNCHER_NAME}"
 REPO_DIR_ESCAPED="$(printf '%s' "$SCRIPT_DIR" | sed -e 's/[&|\\]/\\&/g')"
 ENGINE_EXEC_ESCAPED="$(printf '%s' "$ENGINE_LAUNCHER_PATH" | sed -e 's/[&|\\]/\\&/g')"
+HOME_ESCAPED="$(printf '%s' "$HOME" | sed -e 's/[&|\\]/\\&/g')"
 
 require_command pacman
 require_command python3
@@ -98,6 +101,11 @@ install_rendered_file \
     "$SCRIPT_DIR/packaging/$IBUS_COMPONENT_NAME" \
     "$HOME/.local/share/ibus/component/$IBUS_COMPONENT_NAME"
 
+log "Installing IBus component-path environment"
+install_rendered_file \
+    "$IBUS_ENV_TEMPLATE" \
+    "$HOME/.config/environment.d/$IBUS_ENV_FILE_NAME"
+
 log "Installing IBus engine launcher"
 install_rendered_file \
     "$ENGINE_LAUNCHER_TEMPLATE" \
@@ -113,6 +121,7 @@ echo "Done."
 echo "  Systemd user service: $SERVICE_NAME"
 echo "  D-Bus activation name: io.github.pizzimenti.WhisperDictate1"
 echo "  IBus component metadata: $IBUS_COMPONENT_NAME"
+echo "  IBus environment file: $HOME/.config/environment.d/$IBUS_ENV_FILE_NAME"
 echo "  IBus engine launcher: $ENGINE_LAUNCHER_PATH"
 echo
 echo "Select the Whisper Dictate engine from IBus after the frontend is installed."

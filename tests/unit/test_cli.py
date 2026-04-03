@@ -62,6 +62,31 @@ class CliTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("recording", buf.getvalue())
 
+    def test_stop_during_starting_state_sends_stop(self) -> None:
+        client = _FakeClient(state="starting")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = _handle_stop(client, timeout=0.1, wait=True)
+        self.assertEqual(rc, 0)
+        self.assertIn("stop", client.calls)
+
+    def test_toggle_during_starting_state_sends_stop(self) -> None:
+        client = _FakeClient(state="starting")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = _handle_toggle(client, timeout=0.1, wait=True)
+        self.assertEqual(rc, 0)
+        self.assertIn("stop", client.calls)
+
+    def test_start_during_starting_state_is_noop(self) -> None:
+        client = _FakeClient(state="starting")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = _handle_start(client, timeout=0.1, wait=True)
+        self.assertEqual(rc, 0)
+        self.assertIn("starting", buf.getvalue())
+        self.assertEqual(client.calls, [])
+
     def test_dbus_client_translates_transport_errors(self) -> None:
         class FakeProxy:
             def call_sync(self, *args, **kwargs):

@@ -14,6 +14,7 @@ from whisper_dictate.constants import (
     STATE_ERROR,
     STATE_IDLE,
     STATE_RECORDING,
+    STATE_STARTING,
     STATE_TRANSCRIBING,
 )
 from whisper_dictate.service.dbus_api import DBUS_INTROSPECTION_XML
@@ -27,7 +28,7 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(DBUS_BUS_NAME, "io.github.pizzimenti.WhisperDictate1")
         self.assertEqual(DBUS_OBJECT_PATH, "/io/github/pizzimenti/WhisperDictate1")
         self.assertEqual(DBUS_INTERFACE, "io.github.pizzimenti.WhisperDictate1")
-        self.assertEqual(CANONICAL_STATES, (STATE_IDLE, STATE_RECORDING, STATE_TRANSCRIBING, STATE_ERROR))
+        self.assertEqual(CANONICAL_STATES, (STATE_IDLE, STATE_STARTING, STATE_RECORDING, STATE_TRANSCRIBING, STATE_ERROR))
 
     def test_dbus_introspection_contains_required_methods_and_signals(self) -> None:
         root = ET.fromstring(DBUS_INTROSPECTION_XML[DBUS_INTROSPECTION_XML.index("<node>"):])

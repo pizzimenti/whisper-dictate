@@ -16,7 +16,7 @@ gi.require_version("GLib", "2.0")
 from gi.repository import GLib
 
 from whisper_dictate.config import DictationConfig, parse_args
-from whisper_dictate.constants import STATE_ERROR, STATE_IDLE, STATE_RECORDING, STATE_TRANSCRIBING
+from whisper_dictate.constants import STATE_ERROR, STATE_IDLE, STATE_RECORDING, STATE_STARTING, STATE_TRANSCRIBING
 from whisper_dictate.core.audio import resolve_default_input_device
 from whisper_dictate.exceptions import AudioInputError, ConfigurationError, TranscriptionError
 from whisper_dictate.logging_utils import configure_logging
@@ -340,6 +340,7 @@ class DictationDaemon:
             self._handles = _ThreadHandles()
             self._stop_vad.clear()
 
+        self._write_state(STATE_STARTING)
         mic_name, mic_usable = self._input_device_resolver()
         if not mic_usable:
             with self._lock:
@@ -355,6 +356,7 @@ class DictationDaemon:
                 self._starting = False
                 self._cancel_start.clear()
             self._logger.info("recording start cancelled before activation")
+            self._write_state(STATE_IDLE)
             return
 
         self._handles.decode_thread = threading.Thread(
@@ -375,6 +377,7 @@ class DictationDaemon:
                 self._starting = False
                 self._cancel_start.clear()
             self._logger.info("recording start cancelled before activation")
+            self._write_state(STATE_IDLE)
             return
 
         try:
@@ -386,6 +389,7 @@ class DictationDaemon:
                     self._starting = False
                     self._cancel_start.clear()
                 self._logger.info("recording start cancelled before activation")
+                self._write_state(STATE_IDLE)
                 return
             stream.start()
             if self._cancel_start.is_set():
@@ -394,6 +398,7 @@ class DictationDaemon:
                     self._starting = False
                     self._cancel_start.clear()
                 self._logger.info("recording start cancelled before activation")
+                self._write_state(STATE_IDLE)
                 return
             with self._lock:
                 self._recording = True
