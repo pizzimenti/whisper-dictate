@@ -1,10 +1,10 @@
 # whisper-dictate
 
-Local Whisper transcription for Wayland — three pieces:
+Local Whisper transcription for Wayland, redesigned around IBus as the only text-placement path:
 
 1. **Live CLI** (`mic_realtime.py`): streams mic audio to the terminal in real time.
-2. **System dictation daemon** (`dictate.py`): persistent mic capture/transcribe worker for dictation.
-3. **Global hotkey listener** (`kglobal_hotkey.py`): uses KWin's Wayland accessibility keyboard monitor to toggle dictation and always attempts to type the transcript into the current keyboard focus.
+2. **Core dictation daemon** (`dictate.py`): persistent mic capture/transcribe worker that publishes transcript/state events on session D-Bus.
+3. **IBus frontend**: the only component allowed to place text into applications; it consumes daemon transcript events and maps them to IBus preedit and commit.
 
 This project uses `openai/whisper-large-v3-turbo` converted to CTranslate2 int8 for local English dictation on CPU.
 
@@ -38,13 +38,13 @@ Press `Enter` to stop.
 
 ### System dictation daemon
 
-On Arch/Manjaro, `install.sh` handles everything automatically:
+On Arch/Manjaro, `install.sh` handles the bootstrap path automatically:
 
 ```bash
 bash install.sh
 ```
 
-It installs `wl-clipboard`, sets up the Python environment, and registers the `whisper-dictate` systemd user service.
+It installs `ibus`, sets up the Python environment, registers the `io.github.pizzimenti.WhisperDictate.service` systemd user unit, installs the D-Bus activation file, places the IBus component metadata under the current user's data directory, writes `~/.config/environment.d/60-whisper-dictate-ibus.conf` so IBus can scan that per-user component directory, keeps `XMODIFIERS=@im=ibus` for XWayland/X11 compatibility, installs `~/.config/plasma-workspace/env/whisper-dictate-plasma-wayland.sh` to unset `GTK_IM_MODULE` and `QT_IM_MODULE` during Plasma Wayland startup, installs the IBus engine launcher at `~/.local/bin/ibus-engine-whisper-dictate`, installs a hidden KDE launcher for `dictatectl.py toggle --no-wait`, configures Plasma's KWin Wayland input method in `~/.config/kwinrc` to use the installed `IBus Wayland` desktop file, refreshes the IBus cache, and restarts `ibus-daemon` for the current session.
 
 To start the daemon manually instead:
 
@@ -53,24 +53,15 @@ source .venv/bin/activate
 python dictate.py
 ```
 
-Recommended path on KDE/Wayland:
+The daemon publishes the reverse-DNS session bus name `io.github.pizzimenti.WhisperDictate1`, and the IBus frontend is expected to be selected by that engine name once the frontend package is installed.
+
+The core service is user-level and idempotent:
 
 ```bash
-systemctl --user enable --now whisper-dictate
-systemctl --user enable --now whisper-dictate-hotkey
+systemctl --user enable --now io.github.pizzimenti.WhisperDictate.service
 ```
 
-The hotkey listener grabs `Ctrl+Space` directly through KWin's accessibility keyboard monitor. On each press it:
-
-- starts dictation immediately
-- stops dictation on the next press
-- attempts to type the transcript into the current keyboard focus
-
-There is no AT-SPI cursor/editability gate anymore. If the current target cannot accept typed text, the transcript is still saved in the daemon runtime files and copied to the Wayland clipboard via `wl-copy` for manual paste.
-
-KWin currently restricts that keyboard-monitor interface to the screen-reader bus name `org.gnome.Orca.KeyboardMonitor`, so `whisper-dictate-hotkey.service` owns that name while it runs. If you use Orca, stop the hotkey service first or the listener will fail to start.
-
-If the hotkey listener is not running, or you want to test without the global shortcut backend, use the terminal control path instead:
+If you want to confirm the D-Bus API manually, use the terminal control path once the daemon-side service is available:
 
 ```bash
 python dictatectl.py start
@@ -78,28 +69,35 @@ python dictatectl.py start
 python dictatectl.py stop
 ```
 
-`stop` waits for transcription to finish and prints the latest transcript from the daemon runtime files, so you can test dictation without depending on a global shortcut backend.
+`stop` waits for transcription to finish and prints the latest transcript from the daemon runtime files.
+
+### IBus selection flow
+
+After the IBus frontend is installed, enable it the same way you would any other IBus engine:
+
+1. Open your IBus configuration tool.
+2. Add `Whisper Dictate` or the reverse-DNS engine name `io.github.pizzimenti.WhisperDictate1`.
+3. Select it in the input method switcher when you want dictation text to flow into the focused application.
+
+The daemon never inserts text directly. Partial transcript should appear as preedit and final transcript should be committed by the IBus frontend only.
+If the engine still does not appear immediately after install, or if text fields do not accept dictation commits, sign out and back in once so the desktop session reloads the updated input-method environment and KWin picks up the configured IBus Wayland input method. On Plasma Wayland, `GTK_IM_MODULE` and `QT_IM_MODULE` should remain unset in the desktop session; the compositor-backed `IBus Wayland` path handles native Wayland clients.
+On KDE Plasma, `io.github.pizzimenti.WhisperDictateToggle.desktop` can be bound as a global shortcut to run `dictatectl.py toggle --no-wait`, which is the most reliable way to keep `Ctrl+Space` working as a dictation toggle.
 
 ## Architecture
 
-- `dictate.py`: long-lived daemon that keeps the Whisper model warm, owns microphone capture/transcription, and writes shared runtime files.
-- `dictatectl.py`: stdlib control plane for `start`, `stop`, `toggle`, `status`, and `last-text`.
-- `kglobal_hotkey.py`: system-Python KWin keyboard-monitor listener for the working `Ctrl+Space` toggle.
-- `dictate_runtime.py`: shared runtime-path, daemon-state, and signaling helpers used by the daemon and control helpers.
-- `desktop_actions.py`: shared notification and clipboard-paste helpers for desktop side effects.
+- `dictate.py` (`whisper_dictate/core/daemon.py`): long-lived daemon that keeps the Whisper model warm, owns microphone capture, VAD segmentation, transcription, and publishes state/transcript events over session D-Bus.
+- `ibus_engine.py` (`whisper_dictate/ibus_engine/`): IBus engine process that subscribes to daemon D-Bus signals and maps them to IBus preedit/commit. This is the **only** path allowed to place text into applications.
+- `dictatectl.py` (`whisper_dictate/cli/dictatectl.py`): stdlib D-Bus control plane for `start`, `stop`, `toggle`, `status`, and `last-text`. Use this from a terminal or bind it to a global shortcut.
+- `whisper_dictate/`: package providing constants, exceptions, logging, D-Bus API definition, and the service/IBus/CLI subpackages.
 
 ### Runtime files
 
 The daemon and helpers coordinate through two files under `XDG_RUNTIME_DIR`:
 
-- `whisper-dictate-<uid>.state`: current daemon state (`idle`, `recording`, or `transcribing`)
+- `whisper-dictate-<uid>.state`: current daemon state (`idle`, `starting`, `recording`, `transcribing`, or `error`)
 - `whisper-dictate-<uid>.last.txt`: latest completed transcript
 
-`dictate.py` owns writes to those files. `dictatectl.py` and `kglobal_hotkey.py` read them so control/status behavior stays consistent even though the hotkey listener runs under system Python.
-
-### Helper scripts
-
-`ptt-press.sh`, `ptt-release.sh`, and `toggle.sh` are now thin wrappers around `dictatectl.py`, so there is only one control-plane implementation to maintain.
+`dictate.py` owns writes to those files. `dictatectl.py` reads them so control/status behavior stays consistent across shells and user services.
 
 ## Tuning
 
@@ -108,9 +106,8 @@ The daemon and helpers coordinate through two files under `XDG_RUNTIME_DIR`:
 - `--compute-type int8|float16|float32`: precision/runtime tradeoff.
 - `--language`: defaults to `en`.
 - `--beam-size`: daemon and live CLI default to 1.
-- `--state-file`: daemon runtime state file shared by `dictate.py`, `dictatectl.py`, and the helper scripts.
-- `--last-text-file`: latest transcript file shared by `dictate.py`, `dictatectl.py`, and the hotkey listener.
-- `--type-output/--no-type-output`: let the daemon type directly or leave typing to an external helper.
+- `--state-file`: daemon runtime state file path (default: `$XDG_RUNTIME_DIR/whisper-dictate-<uid>.state`).
+- `--last-text-file`: latest transcript cache path (default: `$XDG_RUNTIME_DIR/whisper-dictate-<uid>.last.txt`).
 - `--vad-filter/--no-vad-filter`: daemon defaults to `vad_filter=False` for lower-latency short-form dictation.
 - `--condition-on-previous-text/--no-condition-on-previous-text`: daemon defaults to `False` to reduce cascading hallucinations.
 - `--no-speech-threshold`: Whisper-side non-speech rejection. The daemon defaults to `0.6`.
@@ -121,23 +118,28 @@ The daemon and helpers coordinate through two files under `XDG_RUNTIME_DIR`:
 
 ## Files
 
-- `install.sh`: install dependencies and register the systemd service (Arch/Manjaro).
+- `install.sh`: install dependencies, register the user service, and install the D-Bus and IBus metadata (Arch/Manjaro).
 - `prepare_model.py`: download and convert the model.
 - `mic_realtime.py`: live terminal transcription.
-- `dictate.py`: system-wide dictation daemon.
-- `dictate_runtime.py`: shared runtime-path, state-file, and daemon-signaling helpers.
-- `desktop_actions.py`: shared desktop notification and typing helpers.
+- `dictate.py`: system-wide dictation daemon entrypoint.
 - `dictatectl.py`: terminal control helper for `start`, `stop`, `toggle`, `status`, and `last-text`.
-- `kglobal_hotkey.py`: KWin accessibility hotkey listener that always attempts pasting into the current keyboard focus.
-- `ptt-press.sh`: push-to-talk press wrapper around `dictatectl.py start --no-wait`.
-- `ptt-release.sh`: push-to-talk release wrapper around `dictatectl.py stop --no-wait`.
-- `toggle.sh`: fallback toggle wrapper around `dictatectl.py toggle --no-wait`.
-- `whisper-dictate-hotkey.service`: user service for the global hotkey listener.
-- `whisper-dictate.service`: systemd user unit.
+- `ibus_engine.py`: IBus engine process entrypoint (launched by `ibus-daemon` via the installed launcher).
+- `dictate_runtime.py`: compatibility re-export shim for `whisper_dictate.runtime`.
+- `whisper_common.py`: shared audio pipeline helpers (VAD, model loading, transcription).
+- `runtime_profile.py`: CPU thread and compute-type selection helpers.
+- `whisper_dictate/`: core package — D-Bus contract, daemon logic, IBus frontend, CLI, and runtime utilities.
+- `systemd/io.github.pizzimenti.WhisperDictate.service`: systemd user unit for the core daemon.
+- `packaging/io.github.pizzimenti.WhisperDictate.service`: D-Bus session activation file (delegates to the systemd unit via `SystemdService=`).
+- `packaging/io.github.pizzimenti.WhisperDictate.xml`: D-Bus introspection XML published on the session bus.
+- `packaging/io.github.pizzimenti.WhisperDictate.component.xml`: IBus component metadata for the engine frontend.
+- `packaging/ibus-engine-whisper-dictate`: launcher template installed as `~/.local/bin/ibus-engine-whisper-dictate` for IBus to execute the frontend.
+- `packaging/io.github.pizzimenti.WhisperDictateToggle.desktop`: hidden KDE application entry that binds `Ctrl+Space` to `dictatectl.py toggle --no-wait`.
+- `packaging/60-whisper-dictate-ibus.conf`: `environment.d` snippet that adds the per-user IBus component directory to `IBUS_COMPONENT_PATH` and sets `XMODIFIERS=@im=ibus`.
+- `packaging/whisper-dictate-plasma-wayland.sh`: Plasma session env script that unsets `GTK_IM_MODULE` and `QT_IM_MODULE` to let the compositor-backed IBus Wayland path handle native clients.
+- `scripts/check-ibus-only.sh`: regression check for forbidden injector and clipboard backends.
 - `transcribe.py`: transcribe an audio file.
 - `benchmark.py`: latency and RTF benchmarking.
-- `eval/sweep.py`: run the current `distil-medium-en` tuning matrix and save per-config transcripts, timings, and WER results.
-- `runtime_profile.py`: shared CPU/runtime helpers.
+- `eval/sweep.py`: run the tuning sweep matrix and save per-config transcripts, timings, and WER results.
 
 ## Evaluation
 
