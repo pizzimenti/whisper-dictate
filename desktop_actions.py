@@ -7,9 +7,6 @@ import subprocess
 
 DEFAULT_APP_NAME = "whisper-dictate"
 DEFAULT_NOTIFY_TIMEOUT_MS = 3000
-DEFAULT_YDOTOOL_TIMEOUT_S = 10
-MAX_YDOTOOL_TIMEOUT_S = 60
-
 
 def _gdbus_notify(message: str, replace_id: int = 0, timeout_ms: int = DEFAULT_NOTIFY_TIMEOUT_MS, app_name: str = DEFAULT_APP_NAME) -> int:
     """Send a notification via gdbus. Returns the notification ID (0 on failure)."""
@@ -73,11 +70,7 @@ class DictationNotifier:
         self._session_id = 0
 
 
-def type_text(text: str) -> subprocess.CompletedProcess[bytes]:
-    """Type text into the current keyboard focus via ydotool."""
-
-    return subprocess.run(
-        ["ydotool", "type", "--key-delay", "25", "--key-hold", "10", "--", text],
-        check=False,
-        timeout=min(MAX_YDOTOOL_TIMEOUT_S, max(DEFAULT_YDOTOOL_TIMEOUT_S, len(text) * 0.05)),
-    )
+def type_text(text: str) -> None:
+    """Paste text into the focused window via Wayland clipboard."""
+    subprocess.run(["wl-copy", "--", text], check=True, timeout=3)
+    subprocess.run(["wtype", "-M", "ctrl", "-k", "v"], check=False, timeout=3)

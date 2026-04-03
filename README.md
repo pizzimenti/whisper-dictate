@@ -44,7 +44,7 @@ On Arch/Manjaro, `install.sh` handles everything automatically:
 bash install.sh
 ```
 
-It installs `ydotool`, enables the system service, adds you to the `input` group, and registers the `whisper-dictate` systemd user service. Log out and back in after running it for the group change to take effect.
+It installs `wtype` and `wl-clipboard`, sets up the Python environment, and registers the `whisper-dictate` systemd user service.
 
 To start the daemon manually instead:
 
@@ -66,7 +66,7 @@ The hotkey listener grabs `Ctrl+Space` directly through KWin's accessibility key
 - stops dictation on the next press
 - attempts to type the transcript into the current keyboard focus
 
-There is no AT-SPI cursor/editability gate anymore. If the current target cannot accept typed text, the transcript is still saved in the daemon runtime files and `ydotool` is simply attempted against whatever currently has keyboard focus.
+There is no AT-SPI cursor/editability gate anymore. If the current target cannot accept typed text, the transcript is still saved in the daemon runtime files and a clipboard paste (`wl-copy` + `wtype` Ctrl+V) is simply attempted against whatever currently has keyboard focus.
 
 KWin currently restricts that keyboard-monitor interface to the screen-reader bus name `org.gnome.Orca.KeyboardMonitor`, so `whisper-dictate-hotkey.service` owns that name while it runs. If you use Orca, stop the hotkey service first or the listener will fail to start.
 
@@ -86,7 +86,7 @@ python dictatectl.py stop
 - `dictatectl.py`: stdlib control plane for `start`, `stop`, `toggle`, `status`, and `last-text`.
 - `kglobal_hotkey.py`: system-Python KWin keyboard-monitor listener for the working `Ctrl+Space` toggle.
 - `dictate_runtime.py`: shared runtime-path, daemon-state, and signaling helpers used by the daemon and control helpers.
-- `desktop_actions.py`: shared `notify-send` and `ydotool` wrappers for desktop side effects.
+- `desktop_actions.py`: shared notification and clipboard-paste helpers for desktop side effects.
 
 ### Runtime files
 
@@ -128,7 +128,7 @@ The daemon and helpers coordinate through two files under `XDG_RUNTIME_DIR`:
 - `dictate_runtime.py`: shared runtime-path, state-file, and daemon-signaling helpers.
 - `desktop_actions.py`: shared desktop notification and typing helpers.
 - `dictatectl.py`: terminal control helper for `start`, `stop`, `toggle`, `status`, and `last-text`.
-- `kglobal_hotkey.py`: KWin accessibility hotkey listener that always attempts typing into the current keyboard focus.
+- `kglobal_hotkey.py`: KWin accessibility hotkey listener that always attempts pasting into the current keyboard focus.
 - `ptt-press.sh`: push-to-talk press wrapper around `dictatectl.py start --no-wait`.
 - `ptt-release.sh`: push-to-talk release wrapper around `dictatectl.py stop --no-wait`.
 - `toggle.sh`: fallback toggle wrapper around `dictatectl.py toggle --no-wait`.

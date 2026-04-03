@@ -20,19 +20,10 @@ run_as_user() {
 if [[ -n "${PKEXEC_UID:-}" ]]; then
     HOME="$(getent passwd "$PKEXEC_UID" | cut -d: -f6)"
     export HOME
-    TARGET_USER="$(getent passwd "$PKEXEC_UID" | cut -d: -f1)"
-else
-    TARGET_USER="${SUDO_USER:-$USER}"
 fi
 
-echo "==> Installing ydotool"
-pacman -S --noconfirm --needed ydotool
-
-echo "==> Enabling ydotool user service"
-run_as_user systemctl --user enable --now ydotool
-
-echo "==> Adding ${TARGET_USER} to input group (required for ydotool)"
-usermod -aG input "$TARGET_USER"
+echo "==> Installing wtype and wl-clipboard"
+pacman -S --noconfirm --needed wtype wl-clipboard
 
 echo "==> Creating Python virtual environment"
 run_as_user python3 -m venv "$SCRIPT_DIR/.venv"
@@ -54,5 +45,4 @@ echo "  Terminal control remains available via ${SCRIPT_DIR}/dictatectl.py."
 echo "  If you run Orca, stop whisper-dictate first because both need"
 echo "  the same keyboard-monitor D-Bus name."
 echo ""
-echo "NOTE: Log out and back in (or reboot) for the input group change to take effect."
-echo "      The whisper-dictate service will start automatically on your next login."
+echo "The whisper-dictate service will start automatically on your next login."
