@@ -12,6 +12,8 @@ from whisper_dictate.exceptions import DbusServiceError
 from whisper_dictate.logging_utils import configure_logging
 from whisper_dictate.runtime import STATE_ERROR, STATE_IDLE, STATE_RECORDING, STATE_STARTING, STATE_TRANSCRIBING
 
+_logger = logging.getLogger("whisper_dictate.cli")
+
 
 class DbusControlClient:
     """Thin D-Bus client wrapper used by the CLI."""
@@ -242,11 +244,17 @@ class DbusControlClient:
                 # is still pending on the GLib main context and would otherwise
                 # leak there until it eventually self-removes. Cancel it
                 # explicitly. If it has already fired, source_remove raises;
-                # swallow that.
+                # log at debug level so unexpected failures are still
+                # observable in production but the expected already-fired
+                # case is not noisy.
                 try:
                     GLib.source_remove(timeout_source_id)
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception as exc:  # noqa: BLE001
+                    _logger.debug(
+                        "GLib.source_remove(%s) suppressed: %s",
+                        timeout_source_id,
+                        exc,
+                    )
 
         return result["state"]
 
