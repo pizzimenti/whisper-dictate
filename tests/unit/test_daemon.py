@@ -95,7 +95,7 @@ def _make_config(runtime_paths: RuntimePaths) -> DictationConfig:
         cpu_threads=1,
         compute_type="int8",
         block_ms=30,
-        energy_threshold=300.0,
+        energy_threshold=600.0,
         silence_ms=220,
         min_speech_ms=180,
         start_speech_ms=90,

@@ -7,7 +7,6 @@ import queue
 import signal
 import threading
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Callable, Protocol
 
 import gi
@@ -30,9 +29,6 @@ from whisper_dictate.exceptions import AudioInputError, ConfigurationError, Tran
 from whisper_dictate.logging_utils import configure_logging
 from whisper_dictate.runtime import RuntimePaths, write_last_text, write_state
 from whisper_dictate.runtime_profile import resolve_runtime, set_thread_env
-
-
-DEFAULT_MODEL_DIR = Path(__file__).resolve().parent.parent.parent / "models/whisper-large-v3-turbo-ct2"
 
 
 class DaemonEventSink(Protocol):

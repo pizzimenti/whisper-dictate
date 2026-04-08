@@ -127,7 +127,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--energy-threshold",
         type=float,
-        default=300.0,
+        default=600.0,
         help="RMS threshold for speech detection.",
     )
     parser.add_argument(

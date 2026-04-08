@@ -111,10 +111,19 @@ class FakeDbusService:
         self.bus.emit("StateChanged", self.state)
 
     def stop(self) -> None:
-        """Transition to transcribing and publish the new state."""
+        """Transition through transcribing and settle to idle.
+
+        Mirrors the production daemon, which always ends a stop pathway
+        with _write_state(STATE_IDLE) after _finalize_text. Without the
+        IDLE follow-up, integration tests had to manually emit a final
+        StateChanged("idle") to complete the lifecycle, masking any
+        regression where the production daemon failed to reach IDLE.
+        """
 
         self.calls.append("Stop")
         self.state = STATE_TRANSCRIBING
+        self.bus.emit("StateChanged", self.state)
+        self.state = STATE_IDLE
         self.bus.emit("StateChanged", self.state)
 
     def toggle(self) -> None:

@@ -123,11 +123,15 @@ def create_ibus_engine_class(ibus_module: ModuleType | None = None) -> type[Any]
             del keycode
             if is_toggle_shortcut(keyval, state, ibus):
                 self._logger.info("Ctrl+Space received by IBus engine; toggling daemon recording")
-                # Dispatch via idle_add so that do_process_key_event returns
-                # immediately.  DaemonControlBridge.toggle() calls call_sync()
-                # with a 5-second timeout; blocking here would freeze all
-                # keyboard delivery on the KDE/Wayland desktop if the daemon
-                # is slow or unreachable.
+                # Dispatch via idle_add so do_process_key_event returns
+                # immediately. DaemonControlBridge._call uses Gio.bus_get +
+                # connection.call (fully async) so the actual D-Bus method
+                # never blocks the GLib main loop today, but we keep the
+                # idle_add hop so do_process_key_event stays non-blocking
+                # regardless of any future change to the bridge
+                # implementation. Anything that runs synchronously here
+                # would freeze keyboard delivery on the KDE/Wayland desktop
+                # if the daemon is slow or unreachable.
                 GLib.idle_add(self._control.toggle)
                 return True
             return False
