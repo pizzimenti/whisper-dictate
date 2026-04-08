@@ -133,8 +133,10 @@ class DictationDaemon:
         # requests so a rapid Ctrl+Space burst (or a misbehaving client)
         # cannot spawn an unbounded number of threads. Each request is a
         # Callable enqueued onto _control_queue; the worker pulls and runs
-        # them sequentially. shutdown() posts the _CONTROL_STOP sentinel.
+        # them sequentially. shutdown() drains the queue and posts a None
+        # sentinel.
         self._control_queue: queue.Queue[Callable[[], None] | None] = queue.Queue()
+        self._shutting_down = threading.Event()
         self._control_thread = threading.Thread(
             target=self._control_worker,
             name="whisper-dictate-control",
@@ -563,10 +565,29 @@ class DictationDaemon:
                 "worker_join_timeout",
                 f"Worker(s) did not exit within {int(join_timeout)}s: {', '.join(stuck)}",
             )
+
+            # Rotate session primitives so the leaked worker(s) cannot
+            # interfere with a future session. Each leaked worker still
+            # holds a reference to the OLD audio_queue, utterance_queue,
+            # and stop_event; replace the daemon's references with fresh
+            # objects so the next _run_start_session reads/writes a
+            # different set. The leaked workers will eventually exit
+            # (they see their OLD self._stop_vad set above) and be reaped
+            # on process exit.
+            #
+            # Without this rotation, _run_start_session's clear of
+            # self._stop_vad would also clear the leaked worker's stop
+            # condition, allowing it to wake back up and consume audio
+            # from — or post utterances into — a different session.
+            with self._lock:
+                self._audio_queue = queue.Queue(maxsize=AUDIO_QUEUE_MAXSIZE)
+                self._utterance_queue = queue.Queue(maxsize=UTTERANCE_QUEUE_MAXSIZE)
+                self._stop_vad = threading.Event()
+
             self._write_state(STATE_ERROR)
-            # Force back to IDLE so the daemon does not stay wedged. The
-            # leaked worker(s) are still daemon=True, so process exit will
-            # eventually clean them up.
+            # Force back to IDLE so the daemon does not stay wedged.
+            # The leaked worker(s) are still daemon=True, so process
+            # exit will eventually clean them up.
             self._write_state(STATE_IDLE)
             with self._lock:
                 self._transcribing = False
@@ -589,11 +610,29 @@ class DictationDaemon:
     def request_start(self) -> None:
         """Start dictation asynchronously via the control-plane thread."""
 
+        if self._shutting_down.is_set():
+            return
         self._control_queue.put(self._run_start_session)
 
     def request_stop(self) -> None:
-        """Stop dictation asynchronously via the control-plane thread."""
+        """Stop dictation asynchronously via the control-plane thread.
 
+        The cancellation flag is set synchronously (not via the queue) so
+        a Stop arriving while _run_start_session is blocked inside
+        input_device_resolver(), stream construction, or stream.start()
+        can cancel the start at its next checkpoint. The serialized
+        control worker would otherwise queue _run_stop_session behind the
+        active start task, missing every cancellation window — leaving
+        the daemon stuck in `starting` until the blocked call eventually
+        returned.
+        """
+
+        with self._lock:
+            if self._starting and not self._recording:
+                self._cancel_start.set()
+                self._stop_vad.set()
+        if self._shutting_down.is_set():
+            return
         self._control_queue.put(self._run_stop_session)
 
     def toggle(self) -> None:
@@ -634,6 +673,13 @@ class DictationDaemon:
     def shutdown(self) -> None:
         """Stop background workers and reset the daemon to idle."""
 
+        # Set _shutting_down FIRST so request_start / request_stop become
+        # no-ops immediately. Without this fence, a request_*() arriving
+        # during shutdown would still enqueue work onto _control_queue
+        # which the dying control thread would happily run, racing with
+        # the shutdown teardown and potentially reopening the stream.
+        self._shutting_down.set()
+
         self._pending_start.clear()
         self._cancel_start.set()
         self._stop_vad.set()
@@ -647,6 +693,17 @@ class DictationDaemon:
             self._join_worker(self._handles.decode_thread, "decode", timeout=5.0, require_exit=False)
         except _WorkerJoinTimeoutError:
             pass
+
+        # Drain any pending control tasks BEFORE the sentinel so a
+        # queued request_start() that arrived just before the fence does
+        # not still execute during shutdown. New request_*() calls are
+        # already filtered out by the _shutting_down check above.
+        while True:
+            try:
+                self._control_queue.get_nowait()
+            except queue.Empty:
+                break
+
         # Stop the control-plane thread last so any in-flight task can
         # finish observing the cleared _recording / _starting flags above.
         self._control_queue.put(None)

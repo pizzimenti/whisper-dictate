@@ -326,6 +326,12 @@ class DictationDaemonTest(unittest.TestCase):
             daemon._handles.vad_thread = _DummyThread()  # type: ignore[assignment]
             daemon._handles.decode_thread = wedged_decode  # type: ignore[assignment]
 
+            # Capture references to the original session primitives so we
+            # can assert they get rotated by the recovery path.
+            old_audio_queue = daemon._audio_queue
+            old_utterance_queue = daemon._utterance_queue
+            old_stop_vad = daemon._stop_vad
+
             daemon._run_stop_session()
 
             # Daemon must not stay wedged in STATE_TRANSCRIBING; it should
@@ -343,6 +349,146 @@ class DictationDaemonTest(unittest.TestCase):
                     for event in sink.events
                 )
             )
+
+            # The leaked decode worker still references the old session
+            # primitives. The daemon must rotate them so a future
+            # _run_start_session reads/writes a different set — otherwise
+            # _run_start_session's clear of self._stop_vad would also
+            # clear the leaked worker's stop condition.
+            self.assertIsNot(daemon._audio_queue, old_audio_queue)
+            self.assertIsNot(daemon._utterance_queue, old_utterance_queue)
+            self.assertIsNot(daemon._stop_vad, old_stop_vad)
+            self.assertTrue(old_stop_vad.is_set())  # leaked worker still sees its old flag
+
+    def test_request_stop_synchronously_cancels_blocked_start(self) -> None:
+        """request_stop must set the cancel flag synchronously, not via the queue.
+
+        With the serialized control thread, a Stop arriving while
+        _run_start_session is blocked inside input_device_resolver(),
+        stream construction, or stream.start() cannot wait behind the
+        active task — it would miss every cancellation window. The
+        synchronous lock-protected flag set bypasses the queue.
+        """
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runtime_paths = RuntimePaths(
+                state_file=Path(tmpdir) / "state",
+                last_text_file=Path(tmpdir) / "last",
+            )
+            daemon = DictationDaemon(
+                _make_config(runtime_paths),
+                model=object(),
+                runtime_paths=runtime_paths,
+                event_sink=_RecordingEventSink(events=[]),
+                stream_factory=lambda **kwargs: _DummyStream(),
+                input_device_resolver=lambda: ("microphone", True),
+            )
+            try:
+                with daemon._lock:
+                    daemon._starting = True
+                    daemon._recording = False
+                self.assertFalse(daemon._cancel_start.is_set())
+                self.assertFalse(daemon._stop_vad.is_set())
+
+                daemon.request_stop()
+
+                # Must be set IMMEDIATELY, before the queued
+                # _run_stop_session task ever runs.
+                self.assertTrue(daemon._cancel_start.is_set())
+                self.assertTrue(daemon._stop_vad.is_set())
+            finally:
+                daemon.shutdown()
+
+    def test_request_methods_are_no_op_after_shutdown(self) -> None:
+        """request_start / request_stop must drop work once shutdown begins.
+
+        Without the _shutting_down fence, work enqueued during or after
+        shutdown could race with the teardown and reopen the audio stream
+        while the service is trying to exit.
+        """
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runtime_paths = RuntimePaths(
+                state_file=Path(tmpdir) / "state",
+                last_text_file=Path(tmpdir) / "last",
+            )
+            daemon = DictationDaemon(
+                _make_config(runtime_paths),
+                model=object(),
+                runtime_paths=runtime_paths,
+                event_sink=_RecordingEventSink(events=[]),
+                stream_factory=lambda **kwargs: _DummyStream(),
+                input_device_resolver=lambda: ("microphone", True),
+            )
+
+            daemon.shutdown()
+
+            # request_*() after shutdown must drop the work silently
+            # rather than enqueueing onto a dead control thread.
+            daemon.request_start()
+            daemon.request_stop()
+            self.assertTrue(daemon._control_queue.empty())
+
+    def test_shutdown_drains_pending_control_tasks(self) -> None:
+        """shutdown must drain queued tasks so they cannot run during teardown.
+
+        A queued request_start() that arrived just before the shutdown
+        fence would otherwise run after shutdown began, racing with
+        flag clearing and stream teardown.
+        """
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runtime_paths = RuntimePaths(
+                state_file=Path(tmpdir) / "state",
+                last_text_file=Path(tmpdir) / "last",
+            )
+            daemon = DictationDaemon(
+                _make_config(runtime_paths),
+                model=object(),
+                runtime_paths=runtime_paths,
+                event_sink=_RecordingEventSink(events=[]),
+                stream_factory=lambda **kwargs: _DummyStream(),
+                input_device_resolver=lambda: ("microphone", True),
+            )
+
+            ran: list[str] = []
+
+            def fake_task() -> None:
+                ran.append("ran")
+
+            # Block the control worker on a sentinel-style task we
+            # control, then queue some real work behind it. We want to
+            # know what happens to that queued work when shutdown is
+            # called before the control worker reaches it.
+            release_gate = threading.Event()
+
+            def gate_task() -> None:
+                ran.append("gate")
+                release_gate.wait(timeout=2.0)
+
+            # Inject the gate task and a follow-up that should NEVER run.
+            daemon._control_queue.put(gate_task)
+            daemon._control_queue.put(fake_task)
+            daemon._control_queue.put(fake_task)
+
+            # Wait until the gate task is actively executing.
+            for _ in range(50):
+                if "gate" in ran:
+                    break
+                threading.Event().wait(0.01)
+            self.assertIn("gate", ran)
+
+            # Shutdown should fence further enqueues and drain the two
+            # follow-up fake_task entries before posting the sentinel.
+            shutdown_thread = threading.Thread(target=daemon.shutdown, daemon=True)
+            shutdown_thread.start()
+            release_gate.set()
+            shutdown_thread.join(timeout=5.0)
+
+            self.assertFalse(shutdown_thread.is_alive())
+            # The two queued fake_task entries must have been drained, NOT
+            # executed. Only the gate task ran.
+            self.assertEqual(ran, ["gate"])
 
     def test_main_does_not_attach_event_sink_when_service_start_fails(self) -> None:
         events: list[str] = []
