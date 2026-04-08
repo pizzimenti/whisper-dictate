@@ -2,9 +2,8 @@
 
 Local Whisper transcription for Wayland, redesigned around IBus as the only text-placement path:
 
-1. **Live CLI** (`mic_realtime.py`): streams mic audio to the terminal in real time.
-2. **Core dictation daemon** (`dictate.py`): persistent mic capture/transcribe worker that publishes transcript/state events on session D-Bus.
-3. **IBus frontend**: the only component allowed to place text into applications; it consumes daemon transcript events and maps them to IBus preedit and commit.
+1. **Core dictation daemon** (`dictate.py`): persistent mic capture/transcribe worker that publishes transcript/state events on session D-Bus.
+2. **IBus frontend**: the only component allowed to place text into applications; it consumes daemon transcript events and maps them to IBus preedit and commit.
 
 This project uses `openai/whisper-large-v3-turbo` converted to CTranslate2 int8 for local English dictation on CPU.
 
@@ -27,14 +26,6 @@ python prepare_model.py --model-id openai/whisper-large-v3-turbo --output-dir mo
 Historical evaluation artifacts for other models are retained under `eval/results/`.
 
 If `torch` is unavailable for your Python version, use a Python 3.12 venv for conversion only.
-
-### Live CLI
-
-```bash
-python mic_realtime.py
-```
-
-Press `Enter` to stop.
 
 ### System dictation daemon
 
@@ -120,7 +111,6 @@ The daemon and helpers coordinate through two files under `XDG_RUNTIME_DIR`:
 
 - `install.sh`: install dependencies, register the user service, and install the D-Bus and IBus metadata (Arch/Manjaro).
 - `prepare_model.py`: download and convert the model.
-- `mic_realtime.py`: live terminal transcription.
 - `dictate.py`: system-wide dictation daemon entrypoint.
 - `dictatectl.py`: terminal control helper for `start`, `stop`, `toggle`, `status`, and `last-text`.
 - `ibus_engine.py`: IBus engine process entrypoint (launched by `ibus-daemon` via the installed launcher).
