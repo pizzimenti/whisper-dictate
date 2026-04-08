@@ -150,21 +150,36 @@ class SessionDbusService:
         # Gio.DBusConnection.emit_signal must run on the GLib main loop thread.
         # GLib.idle_add schedules the emission safely without blocking the caller.
         def _emit() -> bool:
-            self._emit_signal_now(signal_name, parameters, Gio, GLib)
+            # Re-read self._connection inside the main-loop thread: stop()
+            # may have nulled it after this callback was scheduled but
+            # before it ran. Without the re-check, _emit_signal_now would
+            # raise AttributeError on None.emit_signal.
+            connection = self._connection
+            if connection is None:
+                return GLib.SOURCE_REMOVE
+            self._emit_signal_now(signal_name, parameters, connection, Gio, GLib)
             return GLib.SOURCE_REMOVE
 
         GLib.idle_add(_emit)
 
-    def _emit_signal_now(self, signal_name: str, parameters: tuple[Any, ...], Gio: Any, GLib: Any) -> None:
-        """Emit a signal immediately on the active connection."""
+    def _emit_signal_now(
+        self,
+        signal_name: str,
+        parameters: tuple[Any, ...],
+        connection: Any,
+        Gio: Any,
+        GLib: Any,
+    ) -> None:
+        """Emit a signal immediately on the supplied connection."""
 
+        del Gio  # noqa: ARG002 — kept in signature for symmetry with _default_signal_sender
         if signal_name in {"StateChanged", "PartialTranscript", "FinalTranscript"}:
             variant = GLib.Variant("(s)", parameters)
         elif signal_name == "ErrorOccurred":
             variant = GLib.Variant("(ss)", parameters)
         else:
             raise DbusServiceError(f"Unsupported signal: {signal_name}")
-        self._connection.emit_signal(
+        connection.emit_signal(
             None,
             self._object_path,
             self._interface_name,
@@ -228,6 +243,12 @@ class SessionDbusService:
     ) -> None:
         """Handle incoming D-Bus method calls."""
 
+        # Security note: this is a same-user session bus. The `sender`
+        # peer name is intentionally discarded — any process running as
+        # the user can already do anything the user can, so per-peer
+        # access control here would not raise the privilege bar. If you
+        # ever expose this service on the system bus or to a sandboxed
+        # peer (Flatpak portal, etc.), reintroduce a sender allowlist.
         del connection, sender, object_path, interface_name, parameters, user_data
         Gio, GLib = self._load_gi()
         try:
