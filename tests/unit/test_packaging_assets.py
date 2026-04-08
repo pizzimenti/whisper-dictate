@@ -38,7 +38,7 @@ class PackagingAssetTests(unittest.TestCase):
     def test_dbus_and_systemd_service_files_reference_the_frozen_identity(self) -> None:
         dbus_service_path = Path("packaging/io.github.pizzimenti.WhisperDictate.service")
         systemd_service_path = Path("systemd/io.github.pizzimenti.WhisperDictate.service")
-        launcher_template_path = Path("packaging/ibus-engine-whisper-dictate")
+        launcher_template_path = Path("packaging/ibus-engine-whisper-dictate.sh")
         toggle_desktop_path = Path("packaging/io.github.pizzimenti.WhisperDictateToggle.desktop")
         env_template_path = Path("packaging/60-whisper-dictate-ibus.conf")
         plasma_env_script_path = Path("packaging/whisper-dictate-plasma-wayland.sh")
