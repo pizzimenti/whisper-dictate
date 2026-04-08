@@ -155,7 +155,26 @@ class DictationDaemon:
             try:
                 task()
             except Exception:  # noqa: BLE001
-                self._logger.exception("control task failed")
+                # Safety net: if a start/stop session function raises past
+                # its own internal error handlers (a very narrow window —
+                # both functions have comprehensive guards), the daemon
+                # could be left with _starting / _transcribing stuck True
+                # and the next request would be silently rejected by the
+                # state guards. Reset the flags, surface a STATE_ERROR
+                # event, and force back to STATE_IDLE so the daemon stays
+                # responsive.
+                self._logger.exception("control task failed; resetting daemon flags")
+                with self._lock:
+                    self._starting = False
+                    self._transcribing = False
+                self._pending_start.clear()
+                self._cancel_start.clear()
+                try:
+                    self._emit_error("control_task_failed", "Control task raised unexpectedly")
+                    self._write_state(STATE_ERROR)
+                    self._write_state(STATE_IDLE)
+                except Exception:  # noqa: BLE001
+                    self._logger.exception("control task error reporting failed")
 
     def set_event_sink(self, event_sink: DaemonEventSink) -> None:
         """Attach or replace the transport that receives daemon events."""

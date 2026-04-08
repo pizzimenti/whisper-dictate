@@ -165,12 +165,24 @@ class DbusControlClient:
         """Signal-subscription wait used in production."""
 
         Gio, GLib = self._load_gi()
-        try:
-            connection = Gio.bus_get_sync(Gio.BusType.SESSION, None)
-        except Exception as exc:  # noqa: BLE001
-            raise DbusServiceError(
-                f"Unable to acquire session bus to wait for state: {exc}"
-            ) from exc
+
+        # Reuse the proxy's existing session bus connection instead of opening
+        # a second one alongside it. _ensure_proxy is a no-op on subsequent
+        # calls; the first call also walks the introspection path so the
+        # proxy is fully initialized before we subscribe.
+        proxy = self._ensure_proxy()
+        if proxy is None:
+            # Should not happen on the production path (we already returned
+            # early in wait_for_state when _call_sync was injected), but be
+            # defensive: fall back to opening a fresh connection.
+            try:
+                connection = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+            except Exception as exc:  # noqa: BLE001
+                raise DbusServiceError(
+                    f"Unable to acquire session bus to wait for state: {exc}"
+                ) from exc
+        else:
+            connection = proxy.get_connection()
 
         loop = GLib.MainLoop()
         result: dict[str, str | None] = {"state": None}
@@ -205,6 +217,7 @@ class DbusControlClient:
             None,
         )
 
+        timeout_source_id: int | None = None
         try:
             # Race-fix: a transition into the target set may have already
             # happened between the caller's last get_state() and our signal
@@ -220,10 +233,20 @@ class DbusControlClient:
                 loop.quit()
                 return False  # GLib.SOURCE_REMOVE
 
-            GLib.timeout_add(timeout_ms, _on_timeout)
+            timeout_source_id = GLib.timeout_add(timeout_ms, _on_timeout)
             loop.run()
         finally:
             connection.signal_unsubscribe(sub_id)
+            if timeout_source_id is not None:
+                # If the signal arrived before the timeout, the timeout source
+                # is still pending on the GLib main context and would otherwise
+                # leak there until it eventually self-removes. Cancel it
+                # explicitly. If it has already fired, source_remove raises;
+                # swallow that.
+                try:
+                    GLib.source_remove(timeout_source_id)
+                except Exception:  # noqa: BLE001
+                    pass
 
         return result["state"]
 
@@ -374,8 +397,20 @@ def _handle_toggle(client: DbusControlClient, timeout: float, wait: bool) -> int
         if not wait:
             print("toggling")
             return 0
-        new_state = _wait_for_state(client, {STATE_IDLE, STATE_RECORDING, STATE_TRANSCRIBING}, timeout)
-        return 0 if new_state is not None else 1
+        # Toggle while transcribing sets _pending_start on the daemon: it
+        # finishes draining transcription, transitions through IDLE, and
+        # then immediately re-enters RECORDING. Wait for the post-deferred
+        # state — IDLE means the deferred start was dropped, RECORDING
+        # means it succeeded. STATE_TRANSCRIBING is intentionally NOT in
+        # the wait set; including it would cause the race-fix probe to
+        # match the current state and return rc=0 before the deferred
+        # start has actually been honored.
+        new_state = _wait_for_state(client, {STATE_IDLE, STATE_RECORDING}, timeout)
+        if new_state is None:
+            print("Timed out waiting for toggle to resolve.", file=sys.stderr)
+            return 1
+        print(new_state)
+        return 0
     return _handle_start(client, timeout, wait)
 
 
