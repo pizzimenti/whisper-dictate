@@ -132,7 +132,7 @@ The daemon and helpers coordinate through two files under `XDG_RUNTIME_DIR`:
 - `packaging/io.github.pizzimenti.WhisperDictate.service`: D-Bus session activation file (delegates to the systemd unit via `SystemdService=`).
 - `packaging/io.github.pizzimenti.WhisperDictate.xml`: D-Bus introspection XML published on the session bus.
 - `packaging/io.github.pizzimenti.WhisperDictate.component.xml`: IBus component metadata for the engine frontend.
-- `packaging/ibus-engine-whisper-dictate`: launcher template installed as `~/.local/bin/ibus-engine-whisper-dictate` for IBus to execute the frontend.
+- `packaging/ibus-engine-whisper-dictate.sh`: launcher template installed as `~/.local/bin/ibus-engine-whisper-dictate` for IBus to execute the frontend.
 - `packaging/io.github.pizzimenti.WhisperDictateToggle.desktop`: hidden KDE application entry that binds `Ctrl+Space` to `dictatectl.py toggle --no-wait`.
 - `packaging/60-whisper-dictate-ibus.conf`: `environment.d` snippet that adds the per-user IBus component directory to `IBUS_COMPONENT_PATH` and sets `XMODIFIERS=@im=ibus`.
 - `packaging/whisper-dictate-plasma-wayland.sh`: Plasma session env script that unsets `GTK_IM_MODULE` and `QT_IM_MODULE` to let the compositor-backed IBus Wayland path handle native clients.

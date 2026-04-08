@@ -7,7 +7,7 @@ SERVICE_NAME="io.github.pizzimenti.WhisperDictate.service"
 DBUS_SERVICE_NAME="io.github.pizzimenti.WhisperDictate1.service"
 IBUS_COMPONENT_NAME="io.github.pizzimenti.WhisperDictate.component.xml"
 ENGINE_LAUNCHER_NAME="ibus-engine-whisper-dictate"
-ENGINE_LAUNCHER_TEMPLATE="${SCRIPT_DIR}/packaging/${ENGINE_LAUNCHER_NAME}"
+ENGINE_LAUNCHER_TEMPLATE="${SCRIPT_DIR}/packaging/${ENGINE_LAUNCHER_NAME}.sh"
 TOGGLE_DESKTOP_NAME="io.github.pizzimenti.WhisperDictateToggle.desktop"
 TOGGLE_DESKTOP_TEMPLATE="${SCRIPT_DIR}/packaging/${TOGGLE_DESKTOP_NAME}"
 IBUS_ENV_FILE_NAME="60-whisper-dictate-ibus.conf"
@@ -59,6 +59,42 @@ install_copied_file() {
     run_as_user install -m 0644 "$source_file" "$destination_file"
 }
 
+# Sync the runtime files (package + top-level modules + entry shims + requirements)
+# from the source tree into $RUNTIME_DIR. Idempotent. Does NOT touch the venv or
+# the models/ directory — those are handled separately so updates don't redownload
+# the 3+ GB model files.
+sync_runtime() {
+    run_as_user mkdir -p "$RUNTIME_DIR"
+    log "Syncing source files to $RUNTIME_DIR"
+    run_as_user rsync -a --delete \
+        "$SCRIPT_DIR/whisper_dictate/" "$RUNTIME_DIR/whisper_dictate/"
+    run_as_user install -Dm644 "$SCRIPT_DIR/whisper_common.py"   "$RUNTIME_DIR/whisper_common.py"
+    run_as_user install -Dm644 "$SCRIPT_DIR/runtime_profile.py"  "$RUNTIME_DIR/runtime_profile.py"
+    run_as_user install -Dm644 "$SCRIPT_DIR/dictate.py"          "$RUNTIME_DIR/dictate.py"
+    run_as_user install -Dm644 "$SCRIPT_DIR/dictatectl.py"       "$RUNTIME_DIR/dictatectl.py"
+    run_as_user install -Dm644 "$SCRIPT_DIR/ibus_engine.py"      "$RUNTIME_DIR/ibus_engine.py"
+    run_as_user install -Dm644 "$SCRIPT_DIR/requirements.txt"    "$RUNTIME_DIR/requirements.txt"
+}
+
+# --- argument parsing ---
+SYNC_ONLY=0
+if [[ "${1:-}" == "--sync-only" ]]; then
+    SYNC_ONLY=1
+fi
+
+# --- fast path: --sync-only just rsyncs source -> runtime and restarts the daemon.
+# Used for the dev edit loop. No root, no pacman, no venv recreation, models untouched.
+if [[ "$SYNC_ONLY" == "1" ]]; then
+    if [[ $EUID -eq 0 ]]; then
+        die "--sync-only must run as your user, not root"
+    fi
+    RUNTIME_DIR="$HOME/.local/share/whisper-dictate"
+    sync_runtime
+    systemctl --user restart "$SERVICE_NAME" 2>/dev/null || log "service not running; source synced"
+    log "Sync-only complete. RUNTIME_DIR=$RUNTIME_DIR"
+    exit 0
+fi
+
 if [[ $EUID -ne 0 ]]; then
     exec pkexec bash "$SELF" "$@"
 fi
@@ -68,8 +104,9 @@ if [[ -n "${PKEXEC_UID:-}" ]]; then
     export HOME
 fi
 
+RUNTIME_DIR="${HOME}/.local/share/whisper-dictate"
 ENGINE_LAUNCHER_PATH="${HOME}/.local/bin/${ENGINE_LAUNCHER_NAME}"
-REPO_DIR_ESCAPED="$(printf '%s' "$SCRIPT_DIR" | sed -e 's/[&|\\]/\\&/g')"
+REPO_DIR_ESCAPED="$(printf '%s' "$RUNTIME_DIR" | sed -e 's/[&|\\]/\\&/g')"
 ENGINE_EXEC_ESCAPED="$(printf '%s' "$ENGINE_LAUNCHER_PATH" | sed -e 's/[&|\\]/\\&/g')"
 HOME_ESCAPED="$(printf '%s' "$HOME" | sed -e 's/[&|\\]/\\&/g')"
 IBUS_COMPONENT_PATH_VALUE="${HOME}/.local/share/ibus/component:/usr/share/ibus/component"
@@ -80,6 +117,7 @@ require_command python3
 require_command systemctl
 require_command gdbus
 require_command sed
+require_command rsync
 
 log "Installing required system package: ibus"
 pacman -S --noconfirm --needed ibus
@@ -87,12 +125,21 @@ pacman -S --noconfirm --needed ibus
 require_command ibus
 require_command ibus-daemon
 
-log "Creating Python virtual environment"
-run_as_user python3 -m venv "$SCRIPT_DIR/.venv"
+sync_runtime
+
+# One-time migration of the model directory out of the source tree.
+# Skipped on subsequent runs so updates do not redownload the 3+ GB of model data.
+if [[ -d "$SCRIPT_DIR/models" && ! -e "$RUNTIME_DIR/models" ]]; then
+    log "Migrating models/ from source tree to $RUNTIME_DIR/models (one-time)"
+    run_as_user mv "$SCRIPT_DIR/models" "$RUNTIME_DIR/models"
+fi
+
+log "Creating Python virtual environment in $RUNTIME_DIR/.venv"
+run_as_user python3 -m venv "$RUNTIME_DIR/.venv"
 
 log "Installing Python dependencies"
-run_as_user "$SCRIPT_DIR/.venv/bin/pip" install --upgrade pip
-run_as_user "$SCRIPT_DIR/.venv/bin/pip" install -r "$SCRIPT_DIR/requirements.txt"
+run_as_user "$RUNTIME_DIR/.venv/bin/pip" install --upgrade pip
+run_as_user "$RUNTIME_DIR/.venv/bin/pip" install -r "$RUNTIME_DIR/requirements.txt"
 
 log "Installing systemd user service"
 install_rendered_file \
@@ -158,7 +205,8 @@ run_as_user bash -lc \
 
 log "Reloading the user systemd manager"
 run_as_user systemctl --user daemon-reload
-run_as_user systemctl --user enable --now "$SERVICE_NAME"
+run_as_user systemctl --user enable "$SERVICE_NAME"
+run_as_user systemctl --user restart "$SERVICE_NAME"
 
 echo
 echo "Done."
