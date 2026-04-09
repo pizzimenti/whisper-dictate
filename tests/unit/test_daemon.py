@@ -72,14 +72,15 @@ class _CancelOnStartStream(_DummyStream):
 
 
 class _DummyThread:
-    def __init__(self) -> None:
+    def __init__(self, *, alive_after_join: bool = False) -> None:
         self.join_timeouts: list[float | None] = []
+        self._alive_after_join = alive_after_join
 
     def join(self, timeout: float | None = None) -> None:
         self.join_timeouts.append(timeout)
 
     def is_alive(self) -> bool:
-        return False
+        return self._alive_after_join
 
 
 def _make_config(runtime_paths: RuntimePaths) -> DictationConfig:
@@ -94,7 +95,7 @@ def _make_config(runtime_paths: RuntimePaths) -> DictationConfig:
         cpu_threads=1,
         compute_type="int8",
         block_ms=30,
-        energy_threshold=300.0,
+        energy_threshold=600.0,
         silence_ms=220,
         min_speech_ms=180,
         start_speech_ms=90,
@@ -274,7 +275,7 @@ class DictationDaemonTest(unittest.TestCase):
             self.assertEqual(read_state(runtime_paths.state_file), STATE_IDLE)
             self.assertNotIn(("state", STATE_RECORDING), sink.events)
 
-    def test_stop_waits_for_decode_worker_without_timeout(self) -> None:
+    def test_stop_joins_workers_with_bounded_timeout(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             runtime_paths = RuntimePaths(
                 state_file=Path(tmpdir) / "state",
@@ -297,8 +298,271 @@ class DictationDaemonTest(unittest.TestCase):
 
             daemon._run_stop_session()
 
-            self.assertEqual(vad_thread.join_timeouts, [None])
-            self.assertEqual(decode_thread.join_timeouts, [None])
+            self.assertEqual(vad_thread.join_timeouts, [30.0])
+            self.assertEqual(decode_thread.join_timeouts, [30.0])
+            self.assertEqual(daemon.get_state(), STATE_IDLE)
+
+    def test_stop_recovers_to_idle_when_decode_worker_does_not_exit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runtime_paths = RuntimePaths(
+                state_file=Path(tmpdir) / "state",
+                last_text_file=Path(tmpdir) / "last",
+            )
+            sink = _RecordingEventSink(events=[])
+            daemon = DictationDaemon(
+                _make_config(runtime_paths),
+                model=object(),
+                runtime_paths=runtime_paths,
+                event_sink=sink,
+                stream_factory=lambda **kwargs: _DummyStream(),
+                input_device_resolver=lambda: ("microphone", True),
+            )
+            daemon._recording = True
+            daemon._handles.stream = _DummyStream()
+            # Decode worker remains alive after join — simulates a wedged
+            # CTranslate2 / OpenMP deadlock that the old timeout=None code
+            # would have left blocked forever in STATE_TRANSCRIBING.
+            wedged_decode = _DummyThread(alive_after_join=True)
+            daemon._handles.vad_thread = _DummyThread()  # type: ignore[assignment]
+            daemon._handles.decode_thread = wedged_decode  # type: ignore[assignment]
+
+            # Capture references to the original session primitives so we
+            # can assert they get rotated by the recovery path.
+            old_audio_queue = daemon._audio_queue
+            old_utterance_queue = daemon._utterance_queue
+            old_stop_vad = daemon._stop_vad
+
+            daemon._run_stop_session()
+
+            # Daemon must not stay wedged in STATE_TRANSCRIBING; it should
+            # surface a worker_join_timeout error and force back to IDLE so
+            # subsequent Start/Stop calls are accepted.
+            self.assertEqual(daemon.get_state(), STATE_IDLE)
+            self.assertEqual(read_state(runtime_paths.state_file), STATE_IDLE)
+            self.assertFalse(daemon._transcribing)
+            self.assertIn(("state", STATE_TRANSCRIBING), sink.events)
+            self.assertIn(("state", STATE_ERROR), sink.events)
+            self.assertIn(("state", STATE_IDLE), sink.events)
+            self.assertTrue(
+                any(
+                    event[0] == "error" and event[1][0] == "worker_join_timeout"
+                    for event in sink.events
+                )
+            )
+
+            # The leaked decode worker still references the old session
+            # primitives. The daemon must rotate them so a future
+            # _run_start_session reads/writes a different set — otherwise
+            # _run_start_session's clear of self._stop_vad would also
+            # clear the leaked worker's stop condition.
+            self.assertIsNot(daemon._audio_queue, old_audio_queue)
+            self.assertIsNot(daemon._utterance_queue, old_utterance_queue)
+            self.assertIsNot(daemon._stop_vad, old_stop_vad)
+            self.assertTrue(old_stop_vad.is_set())  # leaked worker still sees its old flag
+            # Session generation must bump so a leaked _decode_worker
+            # bails on its next iteration instead of consuming from /
+            # publishing into the rotated new session.
+            self.assertEqual(daemon._session_generation, 1)
+
+    def test_decode_worker_drops_post_transcribe_text_after_rotation(self) -> None:
+        """A leaked decode worker must drop transcripts after a session rotation.
+
+        _decode_worker rereads self._utterance_queue each iteration and
+        publishes via shared event-sink helpers, so without the
+        per-session generation check a worker that outlived a wedge
+        recovery would consume from the new rotated queue OR publish a
+        stale transcription into the new session. The post-transcribe
+        check guards both windows.
+
+        This test simulates the realistic race window: the
+        transcription function takes a long time and the daemon rotates
+        the session in the middle of it. After transcribe returns, the
+        decode worker must compare its captured generation against the
+        current daemon generation and drop the text.
+        """
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runtime_paths = RuntimePaths(
+                state_file=Path(tmpdir) / "state",
+                last_text_file=Path(tmpdir) / "last",
+            )
+            sink = _RecordingEventSink(events=[])
+            rotation_done = threading.Event()
+
+            # Forward declaration so the closure can capture `daemon`.
+            daemon: DictationDaemon  # set below
+
+            def rotating_transcribe(*args: object, **kwargs: object) -> str:
+                # Simulate the wedge-recovery rotation happening WHILE
+                # the leaked worker is mid-transcribe.
+                with daemon._lock:
+                    daemon._session_generation += 1
+                rotation_done.set()
+                return "this transcription belongs to a stale session"
+
+            daemon = DictationDaemon(
+                _make_config(runtime_paths),
+                model=object(),
+                runtime_paths=runtime_paths,
+                event_sink=sink,
+                stream_factory=lambda **kwargs: _DummyStream(),
+                input_device_resolver=lambda: ("microphone", True),
+                transcription_fn=rotating_transcribe,
+            )
+            try:
+                # Provide a "vad_thread" so the queue.Empty fallback path
+                # doesn't take the "vad not alive after stop" early break.
+                daemon._handles.vad_thread = _DummyThread()  # type: ignore[assignment]
+
+                # Put one item to transcribe + a sentinel to exit cleanly
+                # if the generation check ever fails to fire.
+                daemon._utterance_queue.put((["dummy_pcm"], 1.0))
+                daemon._utterance_queue.put(None)
+
+                # Run _decode_worker synchronously in the test thread.
+                daemon._decode_worker()
+
+                # The transcription_fn was called and rotated the daemon.
+                self.assertTrue(rotation_done.is_set())
+                # The post-transcribe generation check must have dropped
+                # the stale text. No partial transcript should have been
+                # published into the new session.
+                self.assertFalse(
+                    any(e[0] == "partial" for e in sink.events),
+                    f"unexpected partial transcript published: {sink.events}",
+                )
+            finally:
+                daemon.shutdown()
+
+    def test_request_stop_synchronously_cancels_blocked_start(self) -> None:
+        """request_stop must set the cancel flag synchronously, not via the queue.
+
+        With the serialized control thread, a Stop arriving while
+        _run_start_session is blocked inside input_device_resolver(),
+        stream construction, or stream.start() cannot wait behind the
+        active task — it would miss every cancellation window. The
+        synchronous lock-protected flag set bypasses the queue.
+        """
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runtime_paths = RuntimePaths(
+                state_file=Path(tmpdir) / "state",
+                last_text_file=Path(tmpdir) / "last",
+            )
+            daemon = DictationDaemon(
+                _make_config(runtime_paths),
+                model=object(),
+                runtime_paths=runtime_paths,
+                event_sink=_RecordingEventSink(events=[]),
+                stream_factory=lambda **kwargs: _DummyStream(),
+                input_device_resolver=lambda: ("microphone", True),
+            )
+            try:
+                with daemon._lock:
+                    daemon._starting = True
+                    daemon._recording = False
+                self.assertFalse(daemon._cancel_start.is_set())
+                self.assertFalse(daemon._stop_vad.is_set())
+
+                daemon.request_stop()
+
+                # Must be set IMMEDIATELY, before the queued
+                # _run_stop_session task ever runs.
+                self.assertTrue(daemon._cancel_start.is_set())
+                self.assertTrue(daemon._stop_vad.is_set())
+            finally:
+                daemon.shutdown()
+
+    def test_request_methods_are_no_op_after_shutdown(self) -> None:
+        """request_start / request_stop must drop work once shutdown begins.
+
+        Without the _shutting_down fence, work enqueued during or after
+        shutdown could race with the teardown and reopen the audio stream
+        while the service is trying to exit.
+        """
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runtime_paths = RuntimePaths(
+                state_file=Path(tmpdir) / "state",
+                last_text_file=Path(tmpdir) / "last",
+            )
+            daemon = DictationDaemon(
+                _make_config(runtime_paths),
+                model=object(),
+                runtime_paths=runtime_paths,
+                event_sink=_RecordingEventSink(events=[]),
+                stream_factory=lambda **kwargs: _DummyStream(),
+                input_device_resolver=lambda: ("microphone", True),
+            )
+
+            daemon.shutdown()
+
+            # request_*() after shutdown must drop the work silently
+            # rather than enqueueing onto a dead control thread.
+            daemon.request_start()
+            daemon.request_stop()
+            self.assertTrue(daemon._control_queue.empty())
+
+    def test_shutdown_drains_pending_control_tasks(self) -> None:
+        """shutdown must drain queued tasks so they cannot run during teardown.
+
+        A queued request_start() that arrived just before the shutdown
+        fence would otherwise run after shutdown began, racing with
+        flag clearing and stream teardown.
+        """
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runtime_paths = RuntimePaths(
+                state_file=Path(tmpdir) / "state",
+                last_text_file=Path(tmpdir) / "last",
+            )
+            daemon = DictationDaemon(
+                _make_config(runtime_paths),
+                model=object(),
+                runtime_paths=runtime_paths,
+                event_sink=_RecordingEventSink(events=[]),
+                stream_factory=lambda **kwargs: _DummyStream(),
+                input_device_resolver=lambda: ("microphone", True),
+            )
+
+            ran: list[str] = []
+
+            def fake_task() -> None:
+                ran.append("ran")
+
+            # Block the control worker on a sentinel-style task we
+            # control, then queue some real work behind it. We want to
+            # know what happens to that queued work when shutdown is
+            # called before the control worker reaches it.
+            release_gate = threading.Event()
+
+            def gate_task() -> None:
+                ran.append("gate")
+                release_gate.wait(timeout=2.0)
+
+            # Inject the gate task and a follow-up that should NEVER run.
+            daemon._control_queue.put(gate_task)
+            daemon._control_queue.put(fake_task)
+            daemon._control_queue.put(fake_task)
+
+            # Wait until the gate task is actively executing.
+            for _ in range(50):
+                if "gate" in ran:
+                    break
+                threading.Event().wait(0.01)
+            self.assertIn("gate", ran)
+
+            # Shutdown should fence further enqueues and drain the two
+            # follow-up fake_task entries before posting the sentinel.
+            shutdown_thread = threading.Thread(target=daemon.shutdown, daemon=True)
+            shutdown_thread.start()
+            release_gate.set()
+            shutdown_thread.join(timeout=5.0)
+
+            self.assertFalse(shutdown_thread.is_alive())
+            # The two queued fake_task entries must have been drained, NOT
+            # executed. Only the gate task ran.
+            self.assertEqual(ran, ["gate"])
 
     def test_main_does_not_attach_event_sink_when_service_start_fails(self) -> None:
         events: list[str] = []

@@ -7,8 +7,8 @@ import statistics
 import time
 from pathlib import Path
 
-from runtime_profile import recommended_shortform_cpu_threads, resolve_runtime, set_thread_env
-from whisper_common import load_whisper_model
+from whisper_dictate.audio_common import load_whisper_model
+from whisper_dictate.runtime_profile import recommended_shortform_cpu_threads, resolve_runtime, set_thread_env
 
 
 def parse_args() -> argparse.Namespace:

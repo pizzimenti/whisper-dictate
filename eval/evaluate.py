@@ -19,10 +19,10 @@ import sys
 import time
 from pathlib import Path
 
-# Add parent dir so we can import runtime_profile
+# Add parent dir so we can import the whisper_dictate package
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from runtime_profile import recommended_shortform_cpu_threads, resolve_runtime, set_thread_env
-from whisper_common import load_whisper_model
+from whisper_dictate.audio_common import load_whisper_model
+from whisper_dictate.runtime_profile import recommended_shortform_cpu_threads, resolve_runtime, set_thread_env
 
 AUDIO_DIR = Path(__file__).parent / "audio"
 RESULTS_DIR = Path(__file__).parent / "results"

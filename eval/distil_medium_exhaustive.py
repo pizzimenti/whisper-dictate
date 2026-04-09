@@ -30,7 +30,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from runtime_profile import recommended_cpu_threads, recommended_shortform_cpu_threads, resolve_runtime, set_thread_env
+from whisper_dictate.runtime_profile import (
+    recommended_cpu_threads,
+    recommended_shortform_cpu_threads,
+    resolve_runtime,
+    set_thread_env,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_MANIFEST = PROJECT_ROOT / "eval/audio/manifest.json"

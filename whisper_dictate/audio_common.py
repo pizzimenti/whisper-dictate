@@ -1,7 +1,8 @@
 """Shared Whisper model loading, transcription, and VAD helpers.
 
-Centralizes logic that was previously duplicated across dictate.py,
-mic_realtime.py, transcribe.py, benchmark.py, and eval/sweep.py.
+Centralizes logic that was previously duplicated across the daemon
+and the eval/research scripts (transcribe.py, benchmark.py,
+eval/sweep.py).
 """
 
 from __future__ import annotations
@@ -87,7 +88,7 @@ class VADConfig:
 
     sample_rate: int = 16000
     block_ms: int = 30
-    energy_threshold: float = 300.0
+    energy_threshold: float = 600.0
     silence_ms: int = 220
     min_speech_ms: int = 180
     start_speech_ms: int = 90
@@ -168,51 +169,58 @@ class VADSegmenter:
             pending_speech_pcm.clear()
             pending_silence_pcm.clear()
 
-        while not self.stop_event.is_set():
-            try:
-                chunk = self.audio_queue.get(timeout=VAD_QUEUE_POLL_TIMEOUT_S)
-            except queue.Empty:
-                continue
+        try:
+            while not self.stop_event.is_set():
+                try:
+                    chunk = self.audio_queue.get(timeout=VAD_QUEUE_POLL_TIMEOUT_S)
+                except queue.Empty:
+                    continue
 
-            rms = float(np.sqrt(np.mean(chunk.astype(np.float32) ** 2)))
-            voiced = rms >= cfg.energy_threshold
+                rms = float(np.sqrt(np.mean(chunk.astype(np.float32) ** 2)))
+                voiced = rms >= cfg.energy_threshold
 
-            if voiced:
-                if not in_speech:
-                    pending_speech_pcm.append(chunk)
-                    pending_speech_block_count += 1
-                    if pending_speech_block_count >= start_speech_blocks:
-                        in_speech = True
-                        utterance_pcm = list(pending_speech_pcm)
-                        speech_block_count = len(utterance_pcm)
-                        pending_speech_pcm = []
-                        pending_speech_block_count = 0
-                        pending_silence_pcm = []
+                if voiced:
+                    if not in_speech:
+                        pending_speech_pcm.append(chunk)
+                        pending_speech_block_count += 1
+                        if pending_speech_block_count >= start_speech_blocks:
+                            in_speech = True
+                            utterance_pcm = list(pending_speech_pcm)
+                            speech_block_count = len(utterance_pcm)
+                            pending_speech_pcm = []
+                            pending_speech_block_count = 0
+                            pending_silence_pcm = []
+                            trailing_silence_count = 0
+                    else:
+                        if pending_silence_pcm:
+                            utterance_pcm.extend(pending_silence_pcm)
+                            pending_silence_pcm = []
+                        utterance_pcm.append(chunk)
+                        speech_block_count += 1
                         trailing_silence_count = 0
+                elif in_speech:
+                    pending_silence_pcm.append(chunk)
+                    trailing_silence_count += 1
                 else:
-                    if pending_silence_pcm:
-                        utterance_pcm.extend(pending_silence_pcm)
-                        pending_silence_pcm = []
-                    utterance_pcm.append(chunk)
-                    speech_block_count += 1
-                    trailing_silence_count = 0
-            elif in_speech:
-                pending_silence_pcm.append(chunk)
-                trailing_silence_count += 1
-            else:
-                pending_speech_pcm = []
-                pending_speech_block_count = 0
+                    pending_speech_pcm = []
+                    pending_speech_block_count = 0
 
-            if in_speech and speech_block_count >= max_utterance_blocks:
+                if in_speech and speech_block_count >= max_utterance_blocks:
+                    commit()
+                    continue
+
+                if in_speech and trailing_silence_count >= silence_blocks:
+                    commit()
+
+            # Flush any in-progress utterance when recording stops
+            if in_speech and speech_block_count >= min_speech_blocks and utterance_pcm:
                 commit()
-                continue
-
-            if in_speech and trailing_silence_count >= silence_blocks:
-                commit()
-
-        # Flush any in-progress utterance when recording stops
-        if in_speech and speech_block_count >= min_speech_blocks and utterance_pcm:
-            commit()
-
-        # Signal the decode thread to exit
-        self.utterance_queue.put(None)
+        finally:
+            # Always post the stop sentinel — even if the loop above raised
+            # — so the decode consumer can never wedge waiting for a sentinel
+            # that never arrives. A short timeout guards against the unlikely
+            # case of a fully-saturated utterance_queue.
+            try:
+                self.utterance_queue.put(None, timeout=1.0)
+            except Exception:  # noqa: BLE001
+                pass

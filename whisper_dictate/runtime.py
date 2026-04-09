@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import os
-import signal
-import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,7 +18,6 @@ from whisper_dictate.constants import (
 from whisper_dictate.exceptions import WhisperDictateError
 
 
-DAEMON_PGREP_PATTERN = r"python.*dictate\.py"
 DEFAULT_STATE_POLL_INTERVAL_S = 0.15
 
 STATE_MISSING = "missing"
@@ -76,10 +73,18 @@ def read_state(state_file: Path) -> str:
 
 
 def write_state(state_file: Path, value: str) -> None:
-    """Persist the daemon state in a newline-terminated runtime file."""
+    """Persist the daemon state in a newline-terminated runtime file.
+
+    Atomic via write-then-rename so a crash mid-write cannot leave the
+    state file truncated, empty, or holding a partially-written value
+    like ``"rec"`` (instead of ``"recording"``) — which downstream
+    helpers would treat as an unrecognized state and spin on.
+    """
 
     state_file.parent.mkdir(parents=True, exist_ok=True)
-    state_file.write_text(f"{value}\n", encoding="utf-8")
+    tmp = state_file.with_suffix(state_file.suffix + ".tmp")
+    tmp.write_text(f"{value}\n", encoding="utf-8")
+    tmp.replace(state_file)
 
 
 def read_last_text(last_text_file: Path) -> str:
@@ -95,37 +100,6 @@ def write_last_text(last_text_file: Path, value: str) -> None:
 
     last_text_file.parent.mkdir(parents=True, exist_ok=True)
     last_text_file.write_text(value, encoding="utf-8")
-
-
-def daemon_pid(*, pattern: str = DAEMON_PGREP_PATTERN) -> int | None:
-    """Return the first running whisper-dictate daemon PID, if any."""
-
-    result = subprocess.run(
-        ["pgrep", "-f", pattern],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        return None
-    for line in result.stdout.splitlines():
-        line = line.strip()
-        if line:
-            return int(line)
-    return None
-
-
-def signal_daemon(sig: signal.Signals, *, pattern: str = DAEMON_PGREP_PATTERN) -> int:
-    """Send a UNIX signal to the running whisper-dictate daemon.
-
-    This remains for compatibility only. New control paths use session D-Bus.
-    """
-
-    pid = daemon_pid(pattern=pattern)
-    if pid is None:
-        raise DaemonControlError("whisper-dictate daemon is not running")
-    os.kill(pid, sig)
-    return pid
 
 
 def wait_for_state(

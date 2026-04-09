@@ -7,7 +7,6 @@ import queue
 import signal
 import threading
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Callable, Protocol
 
 import gi
@@ -15,13 +14,7 @@ import gi
 gi.require_version("GLib", "2.0")
 from gi.repository import GLib
 
-from whisper_dictate.config import DictationConfig, parse_args
-from whisper_dictate.constants import STATE_ERROR, STATE_IDLE, STATE_RECORDING, STATE_STARTING, STATE_TRANSCRIBING
-from whisper_dictate.core.audio import resolve_default_input_device
-from whisper_dictate.exceptions import AudioInputError, ConfigurationError, TranscriptionError
-from whisper_dictate.logging_utils import configure_logging
-from whisper_dictate.runtime import RuntimePaths, write_last_text, write_state
-from whisper_common import (
+from whisper_dictate.audio_common import (
     AUDIO_QUEUE_MAXSIZE,
     UTTERANCE_QUEUE_MAXSIZE,
     VADConfig,
@@ -29,10 +22,13 @@ from whisper_common import (
     load_whisper_model,
     transcribe_pcm,
 )
-from runtime_profile import resolve_runtime, set_thread_env
-
-
-DEFAULT_MODEL_DIR = Path(__file__).resolve().parent.parent.parent / "models/whisper-large-v3-turbo-ct2"
+from whisper_dictate.config import DictationConfig, parse_args
+from whisper_dictate.constants import STATE_ERROR, STATE_IDLE, STATE_RECORDING, STATE_STARTING, STATE_TRANSCRIBING
+from whisper_dictate.core.audio import resolve_default_input_device
+from whisper_dictate.exceptions import AudioInputError, ConfigurationError, TranscriptionError
+from whisper_dictate.logging_utils import configure_logging
+from whisper_dictate.runtime import RuntimePaths, write_last_text, write_state
+from whisper_dictate.runtime_profile import resolve_runtime, set_thread_env
 
 
 class DaemonEventSink(Protocol):
@@ -132,9 +128,97 @@ class DictationDaemon:
         self._cancel_start = threading.Event()
         self._pending_start = threading.Event()
         self._handles = _ThreadHandles()
+        # Session generation: bumped every time the wedge-recovery path
+        # rotates the session primitives. Each decode worker captures the
+        # generation at start and bails on mismatch so a leaked worker
+        # cannot consume from the rotated queue or publish into a
+        # different session via shared event-sink helpers.
+        self._session_generation = 0
+
+        # A single dedicated control-plane thread serializes start/stop
+        # requests so a rapid Ctrl+Space burst (or a misbehaving client)
+        # cannot spawn an unbounded number of threads. Each request is a
+        # Callable enqueued onto _control_queue; the worker pulls and runs
+        # them sequentially. shutdown() drains the queue and posts a None
+        # sentinel.
+        self._control_queue: queue.Queue[Callable[[], None] | None] = queue.Queue()
+        self._shutting_down = threading.Event()
+        self._control_thread = threading.Thread(
+            target=self._control_worker,
+            name="whisper-dictate-control",
+            daemon=True,
+        )
+        self._control_thread.start()
 
         self._write_state(STATE_IDLE)
         write_last_text(self.runtime_paths.last_text_file, "")
+
+    def _control_worker(self) -> None:
+        """Serialize start/stop requests on a single thread."""
+
+        while True:
+            task = self._control_queue.get()
+            if task is None:
+                return
+            try:
+                task()
+            except Exception:  # noqa: BLE001
+                # Safety net: if a start/stop session function raises past
+                # its own internal error handlers (a very narrow window —
+                # both functions have comprehensive guards), the daemon
+                # could be left with a live audio stream, live VAD/decode
+                # workers, AND _starting / _transcribing stuck True. Tear
+                # the session resources down BEFORE flipping flags so the
+                # daemon never reports STATE_IDLE while still holding the
+                # mic or leaking workers. Reset the flags, surface a
+                # STATE_ERROR event, and force back to STATE_IDLE so the
+                # daemon stays responsive.
+                self._logger.exception("control task failed; tearing down session and resetting flags")
+
+                # Best-effort teardown of any live session resources. Each
+                # step is itself wrapped so a failure inside teardown can
+                # never prevent the recovery state transition below.
+                try:
+                    self._stop_vad.set()
+                    self._cancel_start.set()
+                    stream = self._handles.stream
+                    self._handles.stream = None
+                    self._close_stream(stream)
+                    # Drop worker handles; the workers themselves will
+                    # exit on their own next iteration via the stop flag.
+                    # We deliberately do NOT join them here — that's the
+                    # job of the wedge-recovery path in _run_stop_session,
+                    # and joining inside the control worker could block
+                    # the entire daemon if a worker is wedged.
+                    self._handles.vad_thread = None
+                    self._handles.decode_thread = None
+                    # Bump the session generation so any worker that
+                    # outlives this teardown (and rereads daemon state)
+                    # will see a mismatch and bail.
+                    with self._lock:
+                        self._session_generation += 1
+                except Exception:  # noqa: BLE001
+                    self._logger.exception("safety net teardown failed")
+
+                with self._lock:
+                    self._starting = False
+                    self._transcribing = False
+                    # _recording is reset here too for defense in depth.
+                    # _run_start_session / _run_stop_session both reset it
+                    # in their own except blocks today, but if a future
+                    # refactor lets an exception escape with _recording
+                    # still True, every subsequent Start would be silently
+                    # rejected as "daemon is already active" with no
+                    # diagnostic.
+                    self._recording = False
+                self._pending_start.clear()
+                self._cancel_start.clear()
+                try:
+                    self._emit_error("control_task_failed", "Control task raised unexpectedly")
+                    self._write_state(STATE_ERROR)
+                    self._write_state(STATE_IDLE)
+                except Exception:  # noqa: BLE001
+                    self._logger.exception("control task error reporting failed")
 
     def set_event_sink(self, event_sink: DaemonEventSink) -> None:
         """Attach or replace the transport that receives daemon events."""
@@ -310,8 +394,45 @@ class DictationDaemon:
     def _decode_worker(self) -> None:
         """Transcribe each utterance and publish cumulative partial text."""
 
+        # Snapshot session-scoped objects so a leaked worker (one that
+        # outlived its _run_stop_session join timeout) reads from the OLD
+        # queue/event and bails on generation mismatch instead of
+        # consuming from the rotated NEW queue or publishing into a
+        # different session via shared event-sink helpers like
+        # _record_partial_text and _emit_error.
+        session_generation = self._session_generation
+        utterance_queue = self._utterance_queue
+        stop_vad = self._stop_vad
+
         while True:
-            item = self._utterance_queue.get()
+            # Generation mismatch means the daemon has rotated the
+            # session primitives (wedge recovery or control-worker
+            # teardown). Stop processing immediately so we never publish
+            # transcripts into a different session.
+            if self._session_generation != session_generation:
+                self._logger.warning(
+                    "decode worker exiting due to session rotation (gen %d -> %d)",
+                    session_generation,
+                    self._session_generation,
+                )
+                return
+
+            try:
+                item = utterance_queue.get(timeout=1.0)
+            except queue.Empty:
+                # Defensive exit: if a stop has been requested and the VAD
+                # worker is no longer alive, the sentinel will never arrive
+                # (e.g. VAD raised before reaching its put(None)). Break out
+                # so the decode thread does not wedge _run_stop_session.
+                if stop_vad.is_set():
+                    vad_thread = self._handles.vad_thread
+                    if vad_thread is None or not vad_thread.is_alive():
+                        self._logger.warning(
+                            "decode worker exiting without sentinel "
+                            "(vad worker not alive after stop)"
+                        )
+                        break
+                continue
             if item is None:
                 break
             pcm_chunks, _audio_seconds = item
@@ -325,9 +446,21 @@ class DictationDaemon:
                     condition_on_previous_text=self.config.condition_on_previous_text,
                     vad_filter=self.config.vad_filter,
                 )
+                # One more generation check before publishing — the
+                # rotation may have happened during the (potentially
+                # long) transcribe call.
+                if self._session_generation != session_generation:
+                    self._logger.warning(
+                        "decode worker dropping post-transcribe text after session rotation"
+                    )
+                    return
                 if text:
                     self._record_partial_text(text)
             except Exception as exc:  # noqa: BLE001
+                if self._session_generation != session_generation:
+                    # Don't surface a stale-session transcription error
+                    # into the new session.
+                    return
                 error = TranscriptionError(str(exc))
                 self._emit_error("transcription_failed", str(error))
                 self._logger.exception("decode worker failed")
@@ -482,11 +615,70 @@ class DictationDaemon:
         self._stop_vad.set()
 
         # Wait for VAD first (it enqueues None to signal decode when done),
-        # then wait for decode to drain the utterance queue fully.
-        self._join_worker(self._handles.vad_thread, "vad", timeout=None, require_exit=True)
-        self._join_worker(self._handles.decode_thread, "decode", timeout=None, require_exit=True)
+        # then wait for decode to drain the utterance queue fully. Both joins
+        # are bounded so a wedged decode worker (e.g. a CTranslate2 / OpenMP
+        # internal deadlock under SIGTERM races) cannot leave the daemon
+        # stuck in STATE_TRANSCRIBING — every subsequent Start/Stop/Toggle
+        # would be silently rejected.
+        join_timeout = 30.0
+        self._join_worker(self._handles.vad_thread, "vad", timeout=join_timeout, require_exit=False)
+        self._join_worker(self._handles.decode_thread, "decode", timeout=join_timeout, require_exit=False)
+
+        vad_thread = self._handles.vad_thread
+        decode_thread = self._handles.decode_thread
+        vad_alive = vad_thread is not None and vad_thread.is_alive()
+        decode_alive = decode_thread is not None and decode_thread.is_alive()
         self._handles.vad_thread = None
         self._handles.decode_thread = None
+
+        if vad_alive or decode_alive:
+            stuck = []
+            if vad_alive:
+                stuck.append("vad")
+            if decode_alive:
+                stuck.append("decode")
+            self._emit_error(
+                "worker_join_timeout",
+                f"Worker(s) did not exit within {int(join_timeout)}s: {', '.join(stuck)}",
+            )
+
+            # Rotate session primitives so the leaked worker(s) cannot
+            # interfere with a future session. Each leaked worker still
+            # holds a reference to the OLD audio_queue, utterance_queue,
+            # and stop_event; replace the daemon's references with fresh
+            # objects so the next _run_start_session reads/writes a
+            # different set. The leaked workers will eventually exit
+            # (they see their OLD self._stop_vad set above) and be reaped
+            # on process exit.
+            #
+            # Without this rotation, _run_start_session's clear of
+            # self._stop_vad would also clear the leaked worker's stop
+            # condition, allowing it to wake back up and consume audio
+            # from — or post utterances into — a different session.
+            #
+            # Bumping _session_generation makes the bail-out explicit:
+            # _decode_worker captures the generation at start and refuses
+            # to publish into a session whose generation has moved on.
+            # The VAD worker is already isolated because VADSegmenter
+            # captures its queue references at construction time, but
+            # _decode_worker rereads self._utterance_queue each iteration
+            # — so without the generation check it would happily consume
+            # from the rotated NEW queue.
+            with self._lock:
+                self._audio_queue = queue.Queue(maxsize=AUDIO_QUEUE_MAXSIZE)
+                self._utterance_queue = queue.Queue(maxsize=UTTERANCE_QUEUE_MAXSIZE)
+                self._stop_vad = threading.Event()
+                self._session_generation += 1
+
+            self._write_state(STATE_ERROR)
+            # Force back to IDLE so the daemon does not stay wedged.
+            # The leaked worker(s) are still daemon=True, so process
+            # exit will eventually clean them up.
+            self._write_state(STATE_IDLE)
+            with self._lock:
+                self._transcribing = False
+            self._pending_start.clear()
+            return
 
         final_text = self._finalize_text()
         self._write_state(STATE_IDLE)
@@ -502,14 +694,32 @@ class DictationDaemon:
             self.request_start()
 
     def request_start(self) -> None:
-        """Start dictation asynchronously."""
+        """Start dictation asynchronously via the control-plane thread."""
 
-        threading.Thread(target=self._run_start_session, name="whisper-dictate-start", daemon=True).start()
+        if self._shutting_down.is_set():
+            return
+        self._control_queue.put(self._run_start_session)
 
     def request_stop(self) -> None:
-        """Stop dictation asynchronously."""
+        """Stop dictation asynchronously via the control-plane thread.
 
-        threading.Thread(target=self._run_stop_session, name="whisper-dictate-stop", daemon=True).start()
+        The cancellation flag is set synchronously (not via the queue) so
+        a Stop arriving while _run_start_session is blocked inside
+        input_device_resolver(), stream construction, or stream.start()
+        can cancel the start at its next checkpoint. The serialized
+        control worker would otherwise queue _run_stop_session behind the
+        active start task, missing every cancellation window — leaving
+        the daemon stuck in `starting` until the blocked call eventually
+        returned.
+        """
+
+        with self._lock:
+            if self._starting and not self._recording:
+                self._cancel_start.set()
+                self._stop_vad.set()
+        if self._shutting_down.is_set():
+            return
+        self._control_queue.put(self._run_stop_session)
 
     def toggle(self) -> None:
         """Toggle between recording and idle states."""
@@ -549,6 +759,13 @@ class DictationDaemon:
     def shutdown(self) -> None:
         """Stop background workers and reset the daemon to idle."""
 
+        # Set _shutting_down FIRST so request_start / request_stop become
+        # no-ops immediately. Without this fence, a request_*() arriving
+        # during shutdown would still enqueue work onto _control_queue
+        # which the dying control thread would happily run, racing with
+        # the shutdown teardown and potentially reopening the stream.
+        self._shutting_down.set()
+
         self._pending_start.clear()
         self._cancel_start.set()
         self._stop_vad.set()
@@ -562,6 +779,21 @@ class DictationDaemon:
             self._join_worker(self._handles.decode_thread, "decode", timeout=5.0, require_exit=False)
         except _WorkerJoinTimeoutError:
             pass
+
+        # Drain any pending control tasks BEFORE the sentinel so a
+        # queued request_start() that arrived just before the fence does
+        # not still execute during shutdown. New request_*() calls are
+        # already filtered out by the _shutting_down check above.
+        while True:
+            try:
+                self._control_queue.get_nowait()
+            except queue.Empty:
+                break
+
+        # Stop the control-plane thread last so any in-flight task can
+        # finish observing the cleared _recording / _starting flags above.
+        self._control_queue.put(None)
+        self._control_thread.join(timeout=5.0)
         self._write_state(STATE_IDLE)
 
 

@@ -7,7 +7,7 @@ SERVICE_NAME="io.github.pizzimenti.WhisperDictate.service"
 DBUS_SERVICE_NAME="io.github.pizzimenti.WhisperDictate1.service"
 IBUS_COMPONENT_NAME="io.github.pizzimenti.WhisperDictate.component.xml"
 ENGINE_LAUNCHER_NAME="ibus-engine-whisper-dictate"
-ENGINE_LAUNCHER_TEMPLATE="${SCRIPT_DIR}/packaging/${ENGINE_LAUNCHER_NAME}"
+ENGINE_LAUNCHER_TEMPLATE="${SCRIPT_DIR}/packaging/${ENGINE_LAUNCHER_NAME}.sh"
 TOGGLE_DESKTOP_NAME="io.github.pizzimenti.WhisperDictateToggle.desktop"
 TOGGLE_DESKTOP_TEMPLATE="${SCRIPT_DIR}/packaging/${TOGGLE_DESKTOP_NAME}"
 IBUS_ENV_FILE_NAME="60-whisper-dictate-ibus.conf"
@@ -45,7 +45,13 @@ install_rendered_file() {
 
     parent_dir="$(dirname "$destination_file")"
     run_as_user mkdir -p "$parent_dir"
-    run_as_user bash -lc "sed -e 's|@@REPO_DIR@@|${REPO_DIR_ESCAPED}|g' -e 's|@@ENGINE_EXEC@@|${ENGINE_EXEC_ESCAPED}|g' -e 's|@@HOME@@|${HOME_ESCAPED}|g' '$source_file' > '$destination_file'"
+    # Pass paths and substitution values as positional parameters so a path
+    # containing a single quote (e.g., a home directory like /home/o'brien)
+    # cannot break out of the shell quoting and inject commands into the
+    # elevated subprocess.
+    run_as_user bash -lc \
+        'sed -e "s|@@REPO_DIR@@|${1}|g" -e "s|@@ENGINE_EXEC@@|${2}|g" -e "s|@@HOME@@|${3}|g" "${4}" > "${5}"' \
+        -- "$REPO_DIR_ESCAPED" "$ENGINE_EXEC_ESCAPED" "$HOME_ESCAPED" "$source_file" "$destination_file"
     run_as_user chmod "$mode" "$destination_file"
 }
 
@@ -59,6 +65,46 @@ install_copied_file() {
     run_as_user install -m 0644 "$source_file" "$destination_file"
 }
 
+# Sync the runtime files (package + entry shims + requirements) from the
+# source tree into $RUNTIME_DIR. Idempotent. Does NOT touch the venv or the
+# models/ directory — those are handled separately so updates don't redownload
+# the 3+ GB model files.
+sync_runtime() {
+    run_as_user mkdir -p "$RUNTIME_DIR"
+    log "Syncing source files to $RUNTIME_DIR"
+    run_as_user rsync -a --delete \
+        "$SCRIPT_DIR/whisper_dictate/" "$RUNTIME_DIR/whisper_dictate/"
+    run_as_user install -Dm644 "$SCRIPT_DIR/dictate.py"       "$RUNTIME_DIR/dictate.py"
+    run_as_user install -Dm644 "$SCRIPT_DIR/dictatectl.py"    "$RUNTIME_DIR/dictatectl.py"
+    run_as_user install -Dm644 "$SCRIPT_DIR/ibus_engine.py"   "$RUNTIME_DIR/ibus_engine.py"
+    run_as_user install -Dm644 "$SCRIPT_DIR/requirements.txt" "$RUNTIME_DIR/requirements.txt"
+}
+
+# --- argument parsing ---
+SYNC_ONLY=0
+if [[ "${1:-}" == "--sync-only" ]]; then
+    SYNC_ONLY=1
+fi
+
+# --- fast path: --sync-only just rsyncs source -> runtime and restarts the daemon.
+# Used for the dev edit loop. No root, no pacman, no venv recreation, models untouched.
+if [[ "$SYNC_ONLY" == "1" ]]; then
+    if [[ $EUID -eq 0 ]]; then
+        die "--sync-only must run as your user, not root"
+    fi
+    RUNTIME_DIR="$HOME/.local/share/whisper-dictate"
+    sync_runtime
+    # Capture stderr so a real failure (unit syntax error, missing
+    # dependency, etc.) is visible to the user instead of being
+    # silently swallowed alongside the legitimate "service not running"
+    # case.
+    if ! restart_output="$(systemctl --user restart "$SERVICE_NAME" 2>&1)"; then
+        log "Service restart skipped or failed (source synced): ${restart_output:-no detail}"
+    fi
+    log "Sync-only complete. RUNTIME_DIR=$RUNTIME_DIR"
+    exit 0
+fi
+
 if [[ $EUID -ne 0 ]]; then
     exec pkexec bash "$SELF" "$@"
 fi
@@ -68,18 +114,19 @@ if [[ -n "${PKEXEC_UID:-}" ]]; then
     export HOME
 fi
 
+RUNTIME_DIR="${HOME}/.local/share/whisper-dictate"
 ENGINE_LAUNCHER_PATH="${HOME}/.local/bin/${ENGINE_LAUNCHER_NAME}"
-REPO_DIR_ESCAPED="$(printf '%s' "$SCRIPT_DIR" | sed -e 's/[&|\\]/\\&/g')"
+REPO_DIR_ESCAPED="$(printf '%s' "$RUNTIME_DIR" | sed -e 's/[&|\\]/\\&/g')"
 ENGINE_EXEC_ESCAPED="$(printf '%s' "$ENGINE_LAUNCHER_PATH" | sed -e 's/[&|\\]/\\&/g')"
 HOME_ESCAPED="$(printf '%s' "$HOME" | sed -e 's/[&|\\]/\\&/g')"
 IBUS_COMPONENT_PATH_VALUE="${HOME}/.local/share/ibus/component:/usr/share/ibus/component"
-IBUS_COMPONENT_PATH_ESCAPED="$(printf '%s' "$IBUS_COMPONENT_PATH_VALUE" | sed -e 's/[&|\\]/\\&/g')"
 
 require_command pacman
 require_command python3
 require_command systemctl
 require_command gdbus
 require_command sed
+require_command rsync
 
 log "Installing required system package: ibus"
 pacman -S --noconfirm --needed ibus
@@ -87,12 +134,39 @@ pacman -S --noconfirm --needed ibus
 require_command ibus
 require_command ibus-daemon
 
-log "Creating Python virtual environment"
-run_as_user python3 -m venv "$SCRIPT_DIR/.venv"
+sync_runtime
+
+# One-time migration of the model directory out of the source tree.
+# Skipped on subsequent runs so updates do not redownload the 3+ GB of model data.
+if [[ -d "$SCRIPT_DIR/models" && ! -e "$RUNTIME_DIR/models" ]]; then
+    if [[ -L "$SCRIPT_DIR/models" ]]; then
+        # If the user symlinked models/ (e.g., to external storage), don't
+        # `mv` the symlink — that would relocate a possibly-relative link
+        # and silently break the reference. Resolve to an absolute target,
+        # recreate the symlink at the runtime location, and remove the
+        # original. The 3+ GB of model data stays where the user put it.
+        models_target="$(readlink -f "$SCRIPT_DIR/models")"
+        log "models/ is a symlink → $models_target; recreating link at $RUNTIME_DIR/models"
+        run_as_user ln -s "$models_target" "$RUNTIME_DIR/models"
+        run_as_user rm "$SCRIPT_DIR/models"
+    else
+        log "Migrating models/ from source tree to $RUNTIME_DIR/models (one-time)"
+        run_as_user mv "$SCRIPT_DIR/models" "$RUNTIME_DIR/models"
+    fi
+fi
+
+# The venv is recreated unconditionally on every full install. This is
+# intentional: full installs require pkexec and are infrequent, so a
+# clean venv guarantees consistency across upgrades. The dev edit loop
+# uses --sync-only above which skips this entirely. If venv recreation
+# becomes a pain point, gate this behind `[[ ! -d "$RUNTIME_DIR/.venv" ]]`
+# or add a `--recreate-venv` flag.
+log "Creating Python virtual environment in $RUNTIME_DIR/.venv"
+run_as_user python3 -m venv "$RUNTIME_DIR/.venv"
 
 log "Installing Python dependencies"
-run_as_user "$SCRIPT_DIR/.venv/bin/pip" install --upgrade pip
-run_as_user "$SCRIPT_DIR/.venv/bin/pip" install -r "$SCRIPT_DIR/requirements.txt"
+run_as_user "$RUNTIME_DIR/.venv/bin/pip" install --upgrade pip
+run_as_user "$RUNTIME_DIR/.venv/bin/pip" install -r "$RUNTIME_DIR/requirements.txt"
 
 log "Installing systemd user service"
 install_rendered_file \
@@ -152,13 +226,20 @@ if command -v kwriteconfig6 >/dev/null 2>&1; then
 fi
 
 log "Refreshing the IBus engine registry for the current session"
+# Pass IBUS_COMPONENT_PATH as a positional parameter so a $HOME containing
+# a single quote (e.g., /home/o'brien) cannot break out of shell quoting
+# and inject commands into the elevated subprocess. Same fix class as
+# install_rendered_file. The unescaped IBUS_COMPONENT_PATH_VALUE is fine
+# here because we're not running it through sed — only sed needs the
+# &|\ escaping.
 run_as_user bash -lc \
-    "IBUS_COMPONENT_PATH='${IBUS_COMPONENT_PATH_ESCAPED}' ibus write-cache && \
-     IBUS_COMPONENT_PATH='${IBUS_COMPONENT_PATH_ESCAPED}' ibus-daemon -drx -r -t refresh"
+    'IBUS_COMPONENT_PATH="$1" ibus write-cache && IBUS_COMPONENT_PATH="$1" ibus-daemon -drx -r -t refresh' \
+    -- "$IBUS_COMPONENT_PATH_VALUE"
 
 log "Reloading the user systemd manager"
 run_as_user systemctl --user daemon-reload
-run_as_user systemctl --user enable --now "$SERVICE_NAME"
+run_as_user systemctl --user enable "$SERVICE_NAME"
+run_as_user systemctl --user restart "$SERVICE_NAME"
 
 echo
 echo "Done."

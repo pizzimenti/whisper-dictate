@@ -32,7 +32,7 @@ fi
 
 echo "==> Checking required packaging assets"
 for file in \
-  "$repo_dir/packaging/ibus-engine-whisper-dictate" \
+  "$repo_dir/packaging/ibus-engine-whisper-dictate.sh" \
   "$repo_dir/systemd/io.github.pizzimenti.WhisperDictate.service" \
   "$repo_dir/packaging/io.github.pizzimenti.WhisperDictate.service" \
   "$repo_dir/packaging/io.github.pizzimenti.WhisperDictate.component.xml"; do
