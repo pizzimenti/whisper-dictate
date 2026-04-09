@@ -94,7 +94,13 @@ if [[ "$SYNC_ONLY" == "1" ]]; then
     fi
     RUNTIME_DIR="$HOME/.local/share/whisper-dictate"
     sync_runtime
-    systemctl --user restart "$SERVICE_NAME" 2>/dev/null || log "service not running; source synced"
+    # Capture stderr so a real failure (unit syntax error, missing
+    # dependency, etc.) is visible to the user instead of being
+    # silently swallowed alongside the legitimate "service not running"
+    # case.
+    if ! restart_output="$(systemctl --user restart "$SERVICE_NAME" 2>&1)"; then
+        log "Service restart skipped or failed (source synced): ${restart_output:-no detail}"
+    fi
     log "Sync-only complete. RUNTIME_DIR=$RUNTIME_DIR"
     exit 0
 fi
@@ -114,7 +120,6 @@ REPO_DIR_ESCAPED="$(printf '%s' "$RUNTIME_DIR" | sed -e 's/[&|\\]/\\&/g')"
 ENGINE_EXEC_ESCAPED="$(printf '%s' "$ENGINE_LAUNCHER_PATH" | sed -e 's/[&|\\]/\\&/g')"
 HOME_ESCAPED="$(printf '%s' "$HOME" | sed -e 's/[&|\\]/\\&/g')"
 IBUS_COMPONENT_PATH_VALUE="${HOME}/.local/share/ibus/component:/usr/share/ibus/component"
-IBUS_COMPONENT_PATH_ESCAPED="$(printf '%s' "$IBUS_COMPONENT_PATH_VALUE" | sed -e 's/[&|\\]/\\&/g')"
 
 require_command pacman
 require_command python3
@@ -150,6 +155,12 @@ if [[ -d "$SCRIPT_DIR/models" && ! -e "$RUNTIME_DIR/models" ]]; then
     fi
 fi
 
+# The venv is recreated unconditionally on every full install. This is
+# intentional: full installs require pkexec and are infrequent, so a
+# clean venv guarantees consistency across upgrades. The dev edit loop
+# uses --sync-only above which skips this entirely. If venv recreation
+# becomes a pain point, gate this behind `[[ ! -d "$RUNTIME_DIR/.venv" ]]`
+# or add a `--recreate-venv` flag.
 log "Creating Python virtual environment in $RUNTIME_DIR/.venv"
 run_as_user python3 -m venv "$RUNTIME_DIR/.venv"
 
@@ -215,9 +226,15 @@ if command -v kwriteconfig6 >/dev/null 2>&1; then
 fi
 
 log "Refreshing the IBus engine registry for the current session"
+# Pass IBUS_COMPONENT_PATH as a positional parameter so a $HOME containing
+# a single quote (e.g., /home/o'brien) cannot break out of shell quoting
+# and inject commands into the elevated subprocess. Same fix class as
+# install_rendered_file. The unescaped IBUS_COMPONENT_PATH_VALUE is fine
+# here because we're not running it through sed — only sed needs the
+# &|\ escaping.
 run_as_user bash -lc \
-    "IBUS_COMPONENT_PATH='${IBUS_COMPONENT_PATH_ESCAPED}' ibus write-cache && \
-     IBUS_COMPONENT_PATH='${IBUS_COMPONENT_PATH_ESCAPED}' ibus-daemon -drx -r -t refresh"
+    'IBUS_COMPONENT_PATH="$1" ibus write-cache && IBUS_COMPONENT_PATH="$1" ibus-daemon -drx -r -t refresh' \
+    -- "$IBUS_COMPONENT_PATH_VALUE"
 
 log "Reloading the user systemd manager"
 run_as_user systemctl --user daemon-reload
