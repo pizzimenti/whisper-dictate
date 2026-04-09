@@ -8,11 +8,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import whisper_dictate.core.daemon as daemon_module
-from whisper_dictate.config import DictationConfig
-from whisper_dictate.constants import STATE_ERROR, STATE_IDLE, STATE_RECORDING, STATE_STARTING, STATE_TRANSCRIBING
-from whisper_dictate.core.daemon import DictationDaemon
-from whisper_dictate.runtime import RuntimePaths, read_last_text, read_state
+import kdictate.core.daemon as daemon_module
+from kdictate.config import DictationConfig
+from kdictate.constants import STATE_ERROR, STATE_IDLE, STATE_RECORDING, STATE_STARTING, STATE_TRANSCRIBING
+from kdictate.core.daemon import DictationDaemon
+from kdictate.runtime import RuntimePaths, read_last_text, read_state
 
 
 @dataclass
@@ -592,9 +592,9 @@ class DictationDaemonTest(unittest.TestCase):
         config = SimpleNamespace(runtime_paths=object())
 
         with (
-            patch("whisper_dictate.core.daemon._load_model_and_config", return_value=(config, object(), runtime)),
-            patch("whisper_dictate.core.daemon.DictationDaemon", FakeDaemon),
-            patch("whisper_dictate.service.dbus_service.SessionDbusService", FakeService),
+            patch("kdictate.core.daemon._load_model_and_config", return_value=(config, object(), runtime)),
+            patch("kdictate.core.daemon.DictationDaemon", FakeDaemon),
+            patch("kdictate.service.dbus_service.SessionDbusService", FakeService),
         ):
             exit_code = daemon_module.main([])
 

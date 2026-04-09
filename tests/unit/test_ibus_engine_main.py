@@ -5,7 +5,7 @@ from __future__ import annotations
 from unittest import mock
 import unittest
 
-from whisper_dictate.ibus_engine import main as ibus_main
+from kdictate.ibus_engine import main as ibus_main
 
 
 class IbusEngineMainTests(unittest.TestCase):
@@ -17,7 +17,7 @@ class IbusEngineMainTests(unittest.TestCase):
             mock.patch.object(ibus_main, "load_ibus_module", return_value=fake_ibus),
             mock.patch.object(ibus_main, "initialize_engine_runtime", return_value=(object(), mock.Mock())) as init_runtime,
             mock.patch.object(ibus_main.GLib, "MainLoop") as main_loop_cls,
-            mock.patch.object(ibus_main.sys, "argv", ["/tmp/ibus-engine-whisper-dictate"]),
+            mock.patch.object(ibus_main.sys, "argv", ["/tmp/ibus-engine-kdictate"]),
         ):
             loop = main_loop_cls.return_value
             loop.run.side_effect = KeyboardInterrupt
@@ -25,4 +25,4 @@ class IbusEngineMainTests(unittest.TestCase):
             result = ibus_main.main()
 
         self.assertEqual(result, 0)
-        init_runtime.assert_called_once_with("/tmp/ibus-engine-whisper-dictate", ibus_module=fake_ibus)
+        init_runtime.assert_called_once_with("/tmp/ibus-engine-kdictate", ibus_module=fake_ibus)

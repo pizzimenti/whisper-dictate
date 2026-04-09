@@ -3,17 +3,17 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SELF="${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")"
-SERVICE_NAME="io.github.pizzimenti.WhisperDictate.service"
-DBUS_SERVICE_NAME="io.github.pizzimenti.WhisperDictate1.service"
-IBUS_COMPONENT_NAME="io.github.pizzimenti.WhisperDictate.component.xml"
-ENGINE_LAUNCHER_NAME="ibus-engine-whisper-dictate"
+SERVICE_NAME="io.github.pizzimenti.KDictate.service"
+DBUS_SERVICE_NAME="io.github.pizzimenti.KDictate1.service"
+IBUS_COMPONENT_NAME="io.github.pizzimenti.KDictate.component.xml"
+ENGINE_LAUNCHER_NAME="ibus-engine-kdictate"
 ENGINE_LAUNCHER_TEMPLATE="${SCRIPT_DIR}/packaging/${ENGINE_LAUNCHER_NAME}.sh"
-TOGGLE_DESKTOP_NAME="io.github.pizzimenti.WhisperDictateToggle.desktop"
+TOGGLE_DESKTOP_NAME="io.github.pizzimenti.KDictateToggle.desktop"
 TOGGLE_DESKTOP_TEMPLATE="${SCRIPT_DIR}/packaging/${TOGGLE_DESKTOP_NAME}"
-IBUS_ENV_FILE_NAME="60-whisper-dictate-ibus.conf"
+IBUS_ENV_FILE_NAME="60-kdictate-ibus.conf"
 IBUS_ENV_TEMPLATE="${SCRIPT_DIR}/packaging/${IBUS_ENV_FILE_NAME}"
 KDE_VIRTUAL_KEYBOARD_DESKTOP="/usr/share/applications/org.freedesktop.IBus.Panel.Wayland.Gtk3.desktop"
-PLASMA_ENV_SCRIPT_NAME="whisper-dictate-plasma-wayland.sh"
+PLASMA_ENV_SCRIPT_NAME="kdictate-plasma-wayland.sh"
 PLASMA_ENV_SCRIPT_TEMPLATE="${SCRIPT_DIR}/packaging/${PLASMA_ENV_SCRIPT_NAME}"
 
 log() {
@@ -65,7 +65,7 @@ install_copied_file() {
     run_as_user install -m 0644 "$source_file" "$destination_file"
 }
 
-# Sync the runtime files (package + entry shims + requirements) from the
+# Sync the runtime files (package + pyproject + requirements) from the
 # source tree into $RUNTIME_DIR. Idempotent. Does NOT touch the venv or the
 # models/ directory — those are handled separately so updates don't redownload
 # the 3+ GB model files.
@@ -73,11 +73,9 @@ sync_runtime() {
     run_as_user mkdir -p "$RUNTIME_DIR"
     log "Syncing source files to $RUNTIME_DIR"
     run_as_user rsync -a --delete \
-        "$SCRIPT_DIR/whisper_dictate/" "$RUNTIME_DIR/whisper_dictate/"
-    run_as_user install -Dm644 "$SCRIPT_DIR/dictate.py"       "$RUNTIME_DIR/dictate.py"
-    run_as_user install -Dm644 "$SCRIPT_DIR/dictatectl.py"    "$RUNTIME_DIR/dictatectl.py"
-    run_as_user install -Dm644 "$SCRIPT_DIR/ibus_engine.py"   "$RUNTIME_DIR/ibus_engine.py"
+        "$SCRIPT_DIR/kdictate/" "$RUNTIME_DIR/kdictate/"
     run_as_user install -Dm644 "$SCRIPT_DIR/requirements.txt" "$RUNTIME_DIR/requirements.txt"
+    run_as_user install -Dm644 "$SCRIPT_DIR/pyproject.toml"   "$RUNTIME_DIR/pyproject.toml"
 }
 
 # --- argument parsing ---
@@ -92,7 +90,7 @@ if [[ "$SYNC_ONLY" == "1" ]]; then
     if [[ $EUID -eq 0 ]]; then
         die "--sync-only must run as your user, not root"
     fi
-    RUNTIME_DIR="$HOME/.local/share/whisper-dictate"
+    RUNTIME_DIR="$HOME/.local/share/kdictate"
     sync_runtime
     # Capture stderr so a real failure (unit syntax error, missing
     # dependency, etc.) is visible to the user instead of being
@@ -114,7 +112,7 @@ if [[ -n "${PKEXEC_UID:-}" ]]; then
     export HOME
 fi
 
-RUNTIME_DIR="${HOME}/.local/share/whisper-dictate"
+RUNTIME_DIR="${HOME}/.local/share/kdictate"
 ENGINE_LAUNCHER_PATH="${HOME}/.local/bin/${ENGINE_LAUNCHER_NAME}"
 REPO_DIR_ESCAPED="$(printf '%s' "$RUNTIME_DIR" | sed -e 's/[&|\\]/\\&/g')"
 ENGINE_EXEC_ESCAPED="$(printf '%s' "$ENGINE_LAUNCHER_PATH" | sed -e 's/[&|\\]/\\&/g')"
@@ -175,7 +173,7 @@ install_rendered_file \
 
 log "Installing D-Bus activation service"
 install_rendered_file \
-    "$SCRIPT_DIR/packaging/io.github.pizzimenti.WhisperDictate.service" \
+    "$SCRIPT_DIR/packaging/io.github.pizzimenti.KDictate.service" \
     "$HOME/.local/share/dbus-1/services/$DBUS_SERVICE_NAME"
 
 log "Installing IBus component metadata"
@@ -244,14 +242,14 @@ run_as_user systemctl --user restart "$SERVICE_NAME"
 echo
 echo "Done."
 echo "  Systemd user service: $SERVICE_NAME"
-echo "  D-Bus activation name: io.github.pizzimenti.WhisperDictate1"
+echo "  D-Bus activation name: io.github.pizzimenti.KDictate1"
 echo "  IBus component metadata: $IBUS_COMPONENT_NAME"
 echo "  IBus environment file: $HOME/.config/environment.d/$IBUS_ENV_FILE_NAME"
 echo "  Plasma env cleanup: $HOME/.config/plasma-workspace/env/$PLASMA_ENV_SCRIPT_NAME"
 echo "  IBus engine launcher: $ENGINE_LAUNCHER_PATH"
 echo "  KDE shortcut launcher: $HOME/.local/share/applications/$TOGGLE_DESKTOP_NAME"
 echo
-echo "Select the Whisper Dictate engine from IBus after the frontend is installed."
+echo "Select the KDictate engine from IBus after the frontend is installed."
 echo "On KDE Wayland, the installer also selects IBus Wayland as the virtual keyboard when KDE tools are available."
 echo "The installer refreshes the IBus cache and restarts ibus-daemon for the current session."
 echo "After the first install on KDE Wayland, sign out and back in once so KWin picks up the new input-method configuration."

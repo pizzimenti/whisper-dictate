@@ -5,7 +5,7 @@ from __future__ import annotations
 import xml.etree.ElementTree as ET
 import unittest
 
-from whisper_dictate.constants import (
+from kdictate.constants import (
     APP_ROOT_ID,
     CANONICAL_STATES,
     DBUS_BUS_NAME,
@@ -17,17 +17,17 @@ from whisper_dictate.constants import (
     STATE_STARTING,
     STATE_TRANSCRIBING,
 )
-from whisper_dictate.service.dbus_api import DBUS_INTROSPECTION_XML
+from kdictate.service.dbus_api import DBUS_INTROSPECTION_XML
 
 
 class ContractTests(unittest.TestCase):
     """Verify the canonical service contract stays stable."""
 
     def test_names_and_states_are_stable(self) -> None:
-        self.assertEqual(APP_ROOT_ID, "io.github.pizzimenti.WhisperDictate")
-        self.assertEqual(DBUS_BUS_NAME, "io.github.pizzimenti.WhisperDictate1")
-        self.assertEqual(DBUS_OBJECT_PATH, "/io/github/pizzimenti/WhisperDictate1")
-        self.assertEqual(DBUS_INTERFACE, "io.github.pizzimenti.WhisperDictate1")
+        self.assertEqual(APP_ROOT_ID, "io.github.pizzimenti.KDictate")
+        self.assertEqual(DBUS_BUS_NAME, "io.github.pizzimenti.KDictate1")
+        self.assertEqual(DBUS_OBJECT_PATH, "/io/github/pizzimenti/KDictate1")
+        self.assertEqual(DBUS_INTERFACE, "io.github.pizzimenti.KDictate1")
         self.assertEqual(CANONICAL_STATES, (STATE_IDLE, STATE_STARTING, STATE_RECORDING, STATE_TRANSCRIBING, STATE_ERROR))
 
     def test_dbus_introspection_contains_required_methods_and_signals(self) -> None:

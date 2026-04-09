@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import unittest
 
-from whisper_dictate.exceptions import DbusServiceError
-from whisper_dictate.service.dbus_service import SessionDbusService
+from kdictate.exceptions import DbusServiceError
+from kdictate.service.dbus_service import SessionDbusService
 
 
 class _Backend:

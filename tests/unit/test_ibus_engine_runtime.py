@@ -5,8 +5,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 import unittest
 
-from whisper_dictate.ibus_engine import engine
-from whisper_dictate.exceptions import IbusEngineError
+from kdictate.ibus_engine import engine
+from kdictate.exceptions import IbusEngineError
 
 
 class _FakeBus:
@@ -62,7 +62,7 @@ class IbusEngineRuntimeTests(unittest.TestCase):
         fake_ibus = self._make_ibus_module(fake_bus)
 
         bus, factory = engine.initialize_engine_runtime(
-            "/tmp/ibus-engine-whisper-dictate",
+            "/tmp/ibus-engine-kdictate",
             ibus_module=fake_ibus,
         )
 
@@ -76,7 +76,7 @@ class IbusEngineRuntimeTests(unittest.TestCase):
         fake_ibus = self._make_ibus_module(fake_bus)
 
         with self.assertRaisesRegex(IbusEngineError, "connect to the IBus bus"):
-            engine.initialize_engine_runtime("/tmp/ibus-engine-whisper-dictate", ibus_module=fake_ibus)
+            engine.initialize_engine_runtime("/tmp/ibus-engine-kdictate", ibus_module=fake_ibus)
 
         self.assertEqual(fake_bus.requested_names, [])
 
@@ -85,4 +85,4 @@ class IbusEngineRuntimeTests(unittest.TestCase):
         fake_ibus = self._make_ibus_module(fake_bus)
 
         with self.assertRaisesRegex(IbusEngineError, "claim IBus component name"):
-            engine.initialize_engine_runtime("/tmp/ibus-engine-whisper-dictate", ibus_module=fake_ibus)
+            engine.initialize_engine_runtime("/tmp/ibus-engine-kdictate", ibus_module=fake_ibus)

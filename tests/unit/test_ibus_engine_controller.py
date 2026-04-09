@@ -3,8 +3,8 @@ from __future__ import annotations
 import logging
 import unittest
 
-from whisper_dictate.constants import STATE_ERROR, STATE_IDLE, STATE_RECORDING
-from whisper_dictate.ibus_engine.controller import DictationEngineController
+from kdictate.constants import STATE_ERROR, STATE_IDLE, STATE_RECORDING
+from kdictate.ibus_engine.controller import DictationEngineController
 
 
 class FakeAdapter:
@@ -21,7 +21,7 @@ class FakeAdapter:
 class DictationEngineControllerTest(unittest.TestCase):
     def setUp(self) -> None:
         self.adapter = FakeAdapter()
-        self.logger = logging.getLogger("whisper_dictate.tests")
+        self.logger = logging.getLogger("kdictate.tests")
         self.controller = DictationEngineController(self.adapter, self.logger)
 
     def test_partial_transcript_renders_preedit_when_focused(self) -> None:

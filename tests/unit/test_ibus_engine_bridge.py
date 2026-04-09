@@ -3,9 +3,9 @@ from __future__ import annotations
 import logging
 import unittest
 
-from whisper_dictate.constants import STATE_RECORDING
-from whisper_dictate.ibus_engine.controller import DictationEngineController
-from whisper_dictate.ibus_engine.dbus_client import DaemonControlBridge, DaemonSignalBridge
+from kdictate.constants import STATE_RECORDING
+from kdictate.ibus_engine.controller import DictationEngineController
+from kdictate.ibus_engine.dbus_client import DaemonControlBridge, DaemonSignalBridge
 
 
 class FakeVariant:
@@ -67,7 +67,7 @@ class FakeAdapter:
 class DaemonSignalBridgeTest(unittest.TestCase):
     def setUp(self) -> None:
         self.adapter = FakeAdapter()
-        self.logger = logging.getLogger("whisper_dictate.tests")
+        self.logger = logging.getLogger("kdictate.tests")
         self.controller = DictationEngineController(self.adapter, self.logger)
         self.connection = FakeConnection()
         self.bridge = DaemonSignalBridge(
@@ -82,7 +82,7 @@ class DaemonSignalBridgeTest(unittest.TestCase):
 
         self.assertTrue(self.controller.state.daemon_available)
         self.assertEqual(len(self.connection.subscriptions), 4)
-        self.assertEqual(self.connection.calls[0][2], "io.github.pizzimenti.WhisperDictate1")
+        self.assertEqual(self.connection.calls[0][2], "io.github.pizzimenti.KDictate1")
         self.assertEqual(self.controller.state.daemon_state, STATE_RECORDING)
 
     def test_partial_and_final_signals_dispatch(self) -> None:
@@ -94,8 +94,8 @@ class DaemonSignalBridgeTest(unittest.TestCase):
         callback(
             self.connection,
             "sender",
-            "/io/github/pizzimenti/WhisperDictate1",
-            "io.github.pizzimenti.WhisperDictate1",
+            "/io/github/pizzimenti/KDictate1",
+            "io.github.pizzimenti.KDictate1",
             "PartialTranscript",
             FakeVariant(("hello world",)),
             None,
@@ -103,8 +103,8 @@ class DaemonSignalBridgeTest(unittest.TestCase):
         callback(
             self.connection,
             "sender",
-            "/io/github/pizzimenti/WhisperDictate1",
-            "io.github.pizzimenti.WhisperDictate1",
+            "/io/github/pizzimenti/KDictate1",
+            "io.github.pizzimenti.KDictate1",
             "FinalTranscript",
             FakeVariant(("hello world",)),
             None,
@@ -130,7 +130,7 @@ class DaemonSignalBridgeTest(unittest.TestCase):
 
 class DaemonControlBridgeTest(unittest.TestCase):
     def test_toggle_invokes_session_bus_method(self) -> None:
-        logger = logging.getLogger("whisper_dictate.tests")
+        logger = logging.getLogger("kdictate.tests")
         connection = FakeConnection()
 
         # Fake async bus_get: immediately invokes the callback with the connection.
@@ -148,7 +148,7 @@ class DaemonControlBridgeTest(unittest.TestCase):
 
         bridge.toggle()
 
-        self.assertEqual(connection.calls[0][2], "io.github.pizzimenti.WhisperDictate1")
+        self.assertEqual(connection.calls[0][2], "io.github.pizzimenti.KDictate1")
         self.assertEqual(connection.calls[0][3], "Toggle")
 
 

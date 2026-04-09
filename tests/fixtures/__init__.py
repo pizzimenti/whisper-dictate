@@ -1,4 +1,4 @@
-"""Reusable test doubles for whisper-dictate."""
+"""Reusable test doubles for kdictate."""
 
 from .doubles import FakeDbusService, FakeIbusContext, TranscriptBridge
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Evaluate whisper-dictate accuracy (WER) and speed (RTF) against LibriSpeech test-clean.
+"""Evaluate kdictate accuracy (WER) and speed (RTF) against LibriSpeech test-clean.
 
 Downloads 20 samples from LibriSpeech, transcribes each, and reports:
 - WER (Word Error Rate): lower is better, 0% = perfect
@@ -7,7 +7,7 @@ Downloads 20 samples from LibriSpeech, transcribes each, and reports:
 - Per-sample breakdown saved to results/
 
 Usage:
-    cd whisper-dictate
+    cd kdictate
     .venv/bin/python eval/evaluate.py [--samples 20] [--beam-size 5] [--vad-filter]
 """
 
@@ -19,10 +19,10 @@ import sys
 import time
 from pathlib import Path
 
-# Add parent dir so we can import the whisper_dictate package
+# Add parent dir so we can import the kdictate package
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from whisper_dictate.audio_common import load_whisper_model
-from whisper_dictate.runtime_profile import recommended_shortform_cpu_threads, resolve_runtime, set_thread_env
+from kdictate.audio_common import load_whisper_model
+from kdictate.runtime_profile import recommended_shortform_cpu_threads, resolve_runtime, set_thread_env
 
 AUDIO_DIR = Path(__file__).parent / "audio"
 RESULTS_DIR = Path(__file__).parent / "results"
@@ -102,7 +102,7 @@ def compute_wer(reference: str, hypothesis: str) -> float:
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Evaluate whisper-dictate accuracy and speed.")
+    p = argparse.ArgumentParser(description="Evaluate kdictate accuracy and speed.")
     p.add_argument("--samples", type=int, default=20, help="Number of LibriSpeech samples.")
     p.add_argument("--beam-size", type=int, default=5, help="Whisper beam size.")
     p.add_argument("--vad-filter", action="store_true", default=False, help="Enable VAD filter.")

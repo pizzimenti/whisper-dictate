@@ -1,6 +1,6 @@
 # IBus-only architecture
 
-`whisper-dictate` is being redesigned around a strict split:
+`kdictate` is structured around a strict split:
 
 - the core daemon owns audio capture, VAD, transcription, runtime state, and a session D-Bus API
 - the IBus engine is the only component allowed to place text into applications

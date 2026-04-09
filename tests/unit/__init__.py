@@ -1,1 +1,1 @@
-"""Unit tests for whisper-dictate."""
+"""Unit tests for kdictate."""

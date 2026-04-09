@@ -14,7 +14,7 @@ class TranscriptFlowIntegrationTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.stream = io.StringIO()
-        self.logger = logging.getLogger("whisper_dictate.tests.integration")
+        self.logger = logging.getLogger("kdictate.tests.integration")
         self.original_handlers = list(self.logger.handlers)
         for handler in self.original_handlers:
             self.logger.removeHandler(handler)

@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import unittest
 
-from whisper_dictate.exceptions import (
+from kdictate.exceptions import (
     AudioInputError,
     ConfigurationError,
     DbusServiceError,
     FocusContextError,
     IbusEngineError,
     TranscriptionError,
-    WhisperDictateError,
+    KDictateError,
 )
 
 
@@ -27,4 +27,4 @@ class ExceptionHierarchyTests(unittest.TestCase):
             TranscriptionError,
             FocusContextError,
         ):
-            self.assertTrue(issubclass(exc_type, WhisperDictateError))
+            self.assertTrue(issubclass(exc_type, KDictateError))

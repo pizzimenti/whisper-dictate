@@ -1,1 +1,1 @@
-"""Test package for whisper-dictate."""
+"""Test package for kdictate."""

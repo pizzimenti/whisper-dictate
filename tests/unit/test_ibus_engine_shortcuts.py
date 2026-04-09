@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 import unittest
 
-from whisper_dictate.ibus_engine.engine import is_toggle_shortcut
+from kdictate.ibus_engine.engine import is_toggle_shortcut
 
 
 class IbusShortcutTests(unittest.TestCase):

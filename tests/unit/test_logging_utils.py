@@ -6,7 +6,7 @@ import io
 import logging
 import unittest
 
-from whisper_dictate.logging_utils import configure_logging
+from kdictate.logging_utils import configure_logging
 
 
 class LoggingUtilsTests(unittest.TestCase):
@@ -14,7 +14,7 @@ class LoggingUtilsTests(unittest.TestCase):
 
     def test_configure_logging_installs_one_handler(self) -> None:
         stream = io.StringIO()
-        logger_name = "whisper_dictate.tests.logging_utils"
+        logger_name = "kdictate.tests.logging_utils"
         logger = logging.getLogger(logger_name)
         original_handlers = list(logger.handlers)
         for handler in original_handlers:

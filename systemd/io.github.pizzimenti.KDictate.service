@@ -1,0 +1,13 @@
+[Unit]
+Description=KDictate core daemon
+After=graphical-session.target sound.target
+
+[Service]
+Type=simple
+WorkingDirectory=@@REPO_DIR@@
+ExecStart=@@REPO_DIR@@/.venv/bin/python -m kdictate.core --compute-type int8 --beam-size 1 --vad-filter --no-condition-on-previous-text --no-speech-threshold 0.6 --silence-ms 500 --max-utterance-s 8
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

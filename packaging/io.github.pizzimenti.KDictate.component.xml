@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component>
+  <name>io.github.pizzimenti.KDictate</name>
+  <description>KDictate IBus component metadata</description>
+  <exec>@@ENGINE_EXEC@@</exec>
+  <version>0.3</version>
+  <author>Bradley Pizzimenti</author>
+  <license>MIT</license>
+  <homepage>https://github.com/pizzimenti/kdictate</homepage>
+  <textdomain>kdictate</textdomain>
+  <engines>
+    <engine>
+      <name>io.github.pizzimenti.KDictate1</name>
+      <longname>KDictate</longname>
+      <description>Session D-Bus driven dictation engine</description>
+      <language>en</language>
+      <license>MIT</license>
+      <author>Bradley Pizzimenti</author>
+      <icon>audio-input-microphone</icon>
+      <layout>default</layout>
+      <layout_variant></layout_variant>
+      <layout_option></layout_option>
+      <hotkeys></hotkeys>
+      <symbol></symbol>
+      <setup></setup>
+      <version>0.3</version>
+      <textdomain>kdictate</textdomain>
+      <icon_prop_key></icon_prop_key>
+      <rank>1</rank>
+    </engine>
+  </engines>
+</component>

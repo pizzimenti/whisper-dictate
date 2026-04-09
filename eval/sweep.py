@@ -23,8 +23,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from whisper_dictate.audio_common import load_whisper_model
-from whisper_dictate.runtime_profile import (
+from kdictate.audio_common import load_whisper_model
+from kdictate.runtime_profile import (
     recommended_cpu_threads,
     recommended_shortform_cpu_threads,
     resolve_runtime,
@@ -52,7 +52,7 @@ class RunConfig:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run a curated sweep of local whisper-dictate settings.")
+    parser = argparse.ArgumentParser(description="Run a curated sweep of local kdictate settings.")
     parser.add_argument("--manifest", default=str(DEFAULT_MANIFEST), help="Path to the eval manifest JSON.")
     parser.add_argument("--samples", type=int, default=20, help="Number of manifest entries to evaluate.")
     parser.add_argument(
@@ -231,6 +231,12 @@ def configs_for_preset(name: str) -> list[RunConfig]:
 
 def load_manifest(path: Path, limit: int) -> list[dict]:
     manifest = json.loads(path.read_text(encoding="utf-8"))
+    # Resolve any relative audio paths against the repo root so the eval
+    # scripts stay portable across checkout locations.
+    for item in manifest:
+        audio_path = Path(item["path"])
+        if not audio_path.is_absolute():
+            item["path"] = str((PROJECT_ROOT / audio_path).resolve())
     return manifest[:limit]
 
 

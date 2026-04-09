@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=KDictate Toggle
+Comment=Toggle KDictate recording
+Exec=gdbus call --session --dest io.github.pizzimenti.KDictate1 --object-path /io/github/pizzimenti/KDictate1 --method io.github.pizzimenti.KDictate1.Toggle
+Icon=audio-input-microphone
+NoDisplay=true
+Terminal=false
+StartupNotify=false
+X-KDE-Shortcuts=Ctrl+Space

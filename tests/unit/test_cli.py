@@ -5,8 +5,8 @@ import unittest
 from contextlib import redirect_stdout
 from contextlib import redirect_stderr
 
-from whisper_dictate.exceptions import DbusServiceError
-from whisper_dictate.cli.dictatectl import DbusControlClient, _handle_start, _handle_stop, _handle_toggle
+from kdictate.exceptions import DbusServiceError
+from kdictate.cli.dictatectl import DbusControlClient, _handle_start, _handle_stop, _handle_toggle
 
 
 class _FakeClient:

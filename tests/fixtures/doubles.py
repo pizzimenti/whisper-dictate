@@ -6,7 +6,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from whisper_dictate.constants import STATE_IDLE, STATE_RECORDING, STATE_TRANSCRIBING
+from kdictate.constants import STATE_IDLE, STATE_RECORDING, STATE_TRANSCRIBING
 
 
 @dataclass(frozen=True)
@@ -183,7 +183,7 @@ class TranscriptBridge:
     ) -> None:
         self._bus = bus
         self._context = context
-        self._logger = logger or logging.getLogger("whisper_dictate.tests.bridge")
+        self._logger = logger or logging.getLogger("kdictate.tests.bridge")
         self.connected = False
 
     def attach(self, bus: FakeSignalBus | None) -> bool:

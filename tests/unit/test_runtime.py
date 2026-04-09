@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from whisper_dictate.runtime import (
+from kdictate.runtime import (
     RuntimePaths,
     default_runtime_paths,
     read_last_text,
@@ -37,5 +37,5 @@ class RuntimeHelpersTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.dict(os.environ, {"XDG_RUNTIME_DIR": tmpdir}, clear=False):
                 paths = default_runtime_paths(uid=1234)
-        self.assertEqual(paths.state_file, Path(tmpdir) / "whisper-dictate-1234.state")
-        self.assertEqual(paths.last_text_file, Path(tmpdir) / "whisper-dictate-1234.last.txt")
+        self.assertEqual(paths.state_file, Path(tmpdir) / "kdictate-1234.state")
+        self.assertEqual(paths.last_text_file, Path(tmpdir) / "kdictate-1234.last.txt")

@@ -1,1 +1,1 @@
-"""Integration-style tests for whisper-dictate."""
+"""Integration-style tests for kdictate."""

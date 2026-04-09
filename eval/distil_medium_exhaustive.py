@@ -30,7 +30,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from whisper_dictate.runtime_profile import (
+from kdictate.runtime_profile import (
     recommended_cpu_threads,
     recommended_shortform_cpu_threads,
     resolve_runtime,
@@ -157,6 +157,10 @@ def default_configs() -> list[RunConfig]:
 
 def load_manifest(path: Path, limit: int) -> list[dict]:
     manifest = json.loads(path.read_text(encoding="utf-8"))
+    for item in manifest:
+        audio_path = Path(item["path"])
+        if not audio_path.is_absolute():
+            item["path"] = str((PROJECT_ROOT / audio_path).resolve())
     return manifest[:limit]
 
 
