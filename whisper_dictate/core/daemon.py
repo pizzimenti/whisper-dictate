@@ -128,6 +128,12 @@ class DictationDaemon:
         self._cancel_start = threading.Event()
         self._pending_start = threading.Event()
         self._handles = _ThreadHandles()
+        # Session generation: bumped every time the wedge-recovery path
+        # rotates the session primitives. Each decode worker captures the
+        # generation at start and bails on mismatch so a leaked worker
+        # cannot consume from the rotated queue or publish into a
+        # different session via shared event-sink helpers.
+        self._session_generation = 0
 
         # A single dedicated control-plane thread serializes start/stop
         # requests so a rapid Ctrl+Space burst (or a misbehaving client)
@@ -160,12 +166,40 @@ class DictationDaemon:
                 # Safety net: if a start/stop session function raises past
                 # its own internal error handlers (a very narrow window —
                 # both functions have comprehensive guards), the daemon
-                # could be left with _starting / _transcribing stuck True
-                # and the next request would be silently rejected by the
-                # state guards. Reset the flags, surface a STATE_ERROR
-                # event, and force back to STATE_IDLE so the daemon stays
-                # responsive.
-                self._logger.exception("control task failed; resetting daemon flags")
+                # could be left with a live audio stream, live VAD/decode
+                # workers, AND _starting / _transcribing stuck True. Tear
+                # the session resources down BEFORE flipping flags so the
+                # daemon never reports STATE_IDLE while still holding the
+                # mic or leaking workers. Reset the flags, surface a
+                # STATE_ERROR event, and force back to STATE_IDLE so the
+                # daemon stays responsive.
+                self._logger.exception("control task failed; tearing down session and resetting flags")
+
+                # Best-effort teardown of any live session resources. Each
+                # step is itself wrapped so a failure inside teardown can
+                # never prevent the recovery state transition below.
+                try:
+                    self._stop_vad.set()
+                    self._cancel_start.set()
+                    stream = self._handles.stream
+                    self._handles.stream = None
+                    self._close_stream(stream)
+                    # Drop worker handles; the workers themselves will
+                    # exit on their own next iteration via the stop flag.
+                    # We deliberately do NOT join them here — that's the
+                    # job of the wedge-recovery path in _run_stop_session,
+                    # and joining inside the control worker could block
+                    # the entire daemon if a worker is wedged.
+                    self._handles.vad_thread = None
+                    self._handles.decode_thread = None
+                    # Bump the session generation so any worker that
+                    # outlives this teardown (and rereads daemon state)
+                    # will see a mismatch and bail.
+                    with self._lock:
+                        self._session_generation += 1
+                except Exception:  # noqa: BLE001
+                    self._logger.exception("safety net teardown failed")
+
                 with self._lock:
                     self._starting = False
                     self._transcribing = False
@@ -360,15 +394,37 @@ class DictationDaemon:
     def _decode_worker(self) -> None:
         """Transcribe each utterance and publish cumulative partial text."""
 
+        # Snapshot session-scoped objects so a leaked worker (one that
+        # outlived its _run_stop_session join timeout) reads from the OLD
+        # queue/event and bails on generation mismatch instead of
+        # consuming from the rotated NEW queue or publishing into a
+        # different session via shared event-sink helpers like
+        # _record_partial_text and _emit_error.
+        session_generation = self._session_generation
+        utterance_queue = self._utterance_queue
+        stop_vad = self._stop_vad
+
         while True:
+            # Generation mismatch means the daemon has rotated the
+            # session primitives (wedge recovery or control-worker
+            # teardown). Stop processing immediately so we never publish
+            # transcripts into a different session.
+            if self._session_generation != session_generation:
+                self._logger.warning(
+                    "decode worker exiting due to session rotation (gen %d -> %d)",
+                    session_generation,
+                    self._session_generation,
+                )
+                return
+
             try:
-                item = self._utterance_queue.get(timeout=1.0)
+                item = utterance_queue.get(timeout=1.0)
             except queue.Empty:
                 # Defensive exit: if a stop has been requested and the VAD
                 # worker is no longer alive, the sentinel will never arrive
                 # (e.g. VAD raised before reaching its put(None)). Break out
                 # so the decode thread does not wedge _run_stop_session.
-                if self._stop_vad.is_set():
+                if stop_vad.is_set():
                     vad_thread = self._handles.vad_thread
                     if vad_thread is None or not vad_thread.is_alive():
                         self._logger.warning(
@@ -390,9 +446,21 @@ class DictationDaemon:
                     condition_on_previous_text=self.config.condition_on_previous_text,
                     vad_filter=self.config.vad_filter,
                 )
+                # One more generation check before publishing — the
+                # rotation may have happened during the (potentially
+                # long) transcribe call.
+                if self._session_generation != session_generation:
+                    self._logger.warning(
+                        "decode worker dropping post-transcribe text after session rotation"
+                    )
+                    return
                 if text:
                     self._record_partial_text(text)
             except Exception as exc:  # noqa: BLE001
+                if self._session_generation != session_generation:
+                    # Don't surface a stale-session transcription error
+                    # into the new session.
+                    return
                 error = TranscriptionError(str(exc))
                 self._emit_error("transcription_failed", str(error))
                 self._logger.exception("decode worker failed")
@@ -587,10 +655,20 @@ class DictationDaemon:
             # self._stop_vad would also clear the leaked worker's stop
             # condition, allowing it to wake back up and consume audio
             # from — or post utterances into — a different session.
+            #
+            # Bumping _session_generation makes the bail-out explicit:
+            # _decode_worker captures the generation at start and refuses
+            # to publish into a session whose generation has moved on.
+            # The VAD worker is already isolated because VADSegmenter
+            # captures its queue references at construction time, but
+            # _decode_worker rereads self._utterance_queue each iteration
+            # — so without the generation check it would happily consume
+            # from the rotated NEW queue.
             with self._lock:
                 self._audio_queue = queue.Queue(maxsize=AUDIO_QUEUE_MAXSIZE)
                 self._utterance_queue = queue.Queue(maxsize=UTTERANCE_QUEUE_MAXSIZE)
                 self._stop_vad = threading.Event()
+                self._session_generation += 1
 
             self._write_state(STATE_ERROR)
             # Force back to IDLE so the daemon does not stay wedged.
