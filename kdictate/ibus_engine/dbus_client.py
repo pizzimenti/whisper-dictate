@@ -56,6 +56,7 @@ class DaemonSignalBridge:
         self._unwatch_name = unwatch_name or Gio.bus_unwatch_name
         self._watch_id: int | None = None
         self._subscription: _Subscription | None = None
+        self._seed_generation: int = 0
 
     def start(self) -> None:
         """Start watching the daemon bus name."""
@@ -104,6 +105,7 @@ class DaemonSignalBridge:
         """Subscribe to the daemon's transcript signals."""
 
         self._unsubscribe()
+        self._seed_generation += 1
         subscription_ids: list[int] = []
         for signal_name in DBUS_SIGNAL_NAMES:
             subscription_ids.append(
@@ -140,7 +142,15 @@ class DaemonSignalBridge:
         daemon responds.
         """
 
+        generation = self._seed_generation
+
         def _on_reply(source: Any, result: Gio.AsyncResult, user_data: object) -> None:
+            if self._subscription is None or generation != self._seed_generation:
+                self._logger.debug(
+                    "Dropping stale GetState reply (generation %d, current %d)",
+                    generation, self._seed_generation,
+                )
+                return
             try:
                 reply = connection.call_finish(result)
             except Exception as exc:  # noqa: BLE001

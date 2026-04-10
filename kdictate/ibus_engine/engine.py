@@ -25,8 +25,9 @@ from kdictate.app_metadata import (
 from kdictate.constants import APP_ROOT_ID, DBUS_BUS_NAME, DBUS_INTERFACE, DBUS_OBJECT_PATH
 from kdictate.exceptions import IbusEngineError
 from kdictate.logging_utils import configure_logging
-from kdictate.ibus_engine.controller import DictationEngineController, EngineAdapter
+from kdictate.ibus_engine.controller import DictationEngineController
 from kdictate.ibus_engine.dbus_client import DaemonControlBridge, DaemonSignalBridge
+from kdictate.ibus_engine.render_adapter import IbusRenderAdapter
 
 COMPONENT_NAME = APP_ROOT_ID
 ENGINE_NAME = DBUS_INTERFACE
@@ -48,30 +49,6 @@ def load_ibus_module() -> ModuleType:
     from gi.repository import IBus  # type: ignore[import-not-found]
 
     return IBus
-
-
-class _IbusRenderAdapter:
-    """Translate controller render operations into IBus API calls."""
-
-    def __init__(self, engine: Any, ibus_module: ModuleType) -> None:
-        self._engine = engine
-        self._ibus = ibus_module
-
-    def update_preedit(self, text: str, *, visible: bool, focus_mode: str) -> None:
-        ibus_text = self._ibus.Text.new_from_string(text)
-        mode = (
-            self._ibus.PreeditFocusMode.COMMIT
-            if focus_mode == "commit"
-            else self._ibus.PreeditFocusMode.CLEAR
-        )
-        self._engine.update_preedit_text_with_mode(ibus_text, len(text), visible, mode)
-        if visible:
-            self._engine.show_preedit_text()
-        else:
-            self._engine.hide_preedit_text()
-
-    def commit_text(self, text: str) -> None:
-        self._engine.commit_text(self._ibus.Text.new_from_string(text))
 
 
 def is_toggle_shortcut(keyval: int, state: int, ibus_module: ModuleType | None = None) -> bool:
@@ -97,7 +74,7 @@ def create_ibus_engine_class(ibus_module: ModuleType | None = None) -> type[Any]
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             super().__init__(*args, **kwargs)
             self._logger = logger.getChild("engine")
-            self._adapter = _IbusRenderAdapter(self, ibus)
+            self._adapter = IbusRenderAdapter(self, ibus)
             self._controller = DictationEngineController(self._adapter, self._logger)
             self._bridge = DaemonSignalBridge(self._controller, self._logger)
             self._control = DaemonControlBridge(self._logger)
@@ -123,9 +100,6 @@ def create_ibus_engine_class(ibus_module: ModuleType | None = None) -> type[Any]
         def do_reset(self) -> None:
             self._controller.reset()
 
-        def do_set_surrounding_text(self, text: Any, cursor_pos: int, anchor_pos: int) -> None:
-            self._controller.set_surrounding_text(_coerce_text(text), cursor_pos, anchor_pos)
-
         def do_process_key_event(self, keyval: int, keycode: int, state: int) -> bool:
             del keycode
             if is_toggle_shortcut(keyval, state, ibus):
@@ -145,6 +119,7 @@ def create_ibus_engine_class(ibus_module: ModuleType | None = None) -> type[Any]
 
         def do_destroy(self) -> None:
             self._bridge.stop()
+            self._adapter.shutdown()
             self._logger.info("IBus engine destroyed")
             try:
                 super().do_destroy()
@@ -222,12 +197,3 @@ def initialize_engine_runtime(
     factory = build_engine_factory(bus=bus, ibus_module=ibus)
     claim_component_name(bus, ibus_module=ibus)
     return bus, factory
-
-
-def _coerce_text(text: Any) -> str:
-    """Convert an IBus text object or plain string into a string value."""
-
-    getter = getattr(text, "get_text", None)
-    if callable(getter):
-        return str(getter())
-    return str(text)

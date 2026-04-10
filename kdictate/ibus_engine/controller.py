@@ -14,7 +14,15 @@ from kdictate.constants import (
     STATE_TRANSCRIBING,
 )
 
-PreeditFocusMode = Literal["clear", "commit"]
+AnimationMode = Literal["listening", "transcribing"]
+
+
+@dataclass(frozen=True, slots=True)
+class PreeditPresentation:
+    """Rendered preedit intent produced by the controller."""
+
+    partial: str
+    mode: AnimationMode
 
 
 class EngineAdapter(Protocol):
@@ -24,8 +32,8 @@ class EngineAdapter(Protocol):
     calls. Tests use a fake adapter to assert the exact render sequence.
     """
 
-    def update_preedit(self, text: str, *, visible: bool, focus_mode: PreeditFocusMode) -> None:
-        """Update the preedit buffer."""
+    def set_preedit(self, presentation: PreeditPresentation | None) -> None:
+        """Render a preedit presentation, or hide preedit when ``None``."""
 
     def commit_text(self, text: str) -> None:
         """Commit finalized text to the focused application."""
@@ -44,9 +52,6 @@ class EngineState:
     last_error_code: str = ""
     last_error_message: str = ""
     preedit_visible: bool = False
-    surrounding_text: str = ""
-    surrounding_cursor_pos: int = 0
-    surrounding_anchor_pos: int = 0
 
 
 class DictationEngineController:
@@ -86,7 +91,7 @@ class DictationEngineController:
             self._logger.info("IBus engine disable requested while already disabled")
         self._state.enabled = False
         self._state.focused = False
-        self._clear_preedit(reason="disable")
+        self._hide_preedit(reason="disable")
         self._logger.info("IBus engine disabled")
 
     def focus_in(self) -> None:
@@ -101,13 +106,13 @@ class DictationEngineController:
 
         self._state.focused = False
         self._logger.info("IBus engine focus out")
-        self._clear_preedit(reason="focus-out")
+        self._hide_preedit(reason="focus-out")
 
     def reset(self) -> None:
         """Clear the visible preedit without changing focus ownership."""
 
         self._logger.info("IBus engine reset")
-        self._clear_preedit(reason="reset")
+        self._hide_preedit(reason="reset")
 
     def set_daemon_available(self, available: bool) -> None:
         """Update daemon reachability and reconcile any visible state."""
@@ -121,8 +126,8 @@ class DictationEngineController:
             self._sync_preedit(reason="daemon-available")
         else:
             self._logger.warning("IBus engine lost kdictate daemon connection")
-            self._clear_preedit(reason="daemon-lost")
             self._state.pending_partial = ""
+            self._hide_preedit(reason="daemon-lost")
 
     def handle_state_changed(self, state: str) -> None:
         """Apply a daemon state transition."""
@@ -130,7 +135,8 @@ class DictationEngineController:
         if state not in {STATE_IDLE, STATE_STARTING, STATE_RECORDING, STATE_TRANSCRIBING, STATE_ERROR}:
             self._logger.warning("Ignoring unknown daemon state %r", state)
             self._state.daemon_state = STATE_ERROR
-            self._clear_preedit(reason="invalid-state")
+            self._state.pending_partial = ""
+            self._hide_preedit(reason="invalid-state")
             return
 
         previous = self._state.daemon_state
@@ -139,33 +145,41 @@ class DictationEngineController:
 
         if state in {STATE_IDLE, STATE_STARTING, STATE_ERROR}:
             self._state.pending_partial = ""
-            self._clear_preedit(reason=f"state-{state}")
+            self._hide_preedit(reason=f"state-{state}")
             return
 
-        self._sync_preedit(reason=f"state-{state}")
+        if state == STATE_TRANSCRIBING:
+            if self._can_render_status():
+                self._show_preedit(self._state.pending_partial, "transcribing")
+                self._logger.info("Transcribing animation started")
+            else:
+                self._hide_preedit(reason="transcribing-without-focus")
+            return
+
+        if state == STATE_RECORDING:
+            if self._can_render_status():
+                self._show_preedit(self._state.pending_partial, "listening")
+            return
 
     def handle_partial_transcript(self, text: str) -> None:
         """Render partial transcript text into the preedit buffer."""
 
         normalized = self._normalize_text(text)
         self._state.pending_partial = normalized
-        if not normalized:
-            self._logger.debug("Ignoring empty partial transcript")
-            self._clear_preedit(reason="empty-partial")
-            return
 
         if not self._can_render_live_text():
-            self._logger.info(
-                "Caching partial transcript until focus is available: daemon=%s focused=%s enabled=%s state=%s",
-                self._state.daemon_available,
-                self._state.focused,
-                self._state.enabled,
-                self._state.daemon_state,
-            )
+            if normalized:
+                self._logger.info(
+                    "Caching partial transcript until focus is available: daemon=%s focused=%s enabled=%s state=%s",
+                    self._state.daemon_available,
+                    self._state.focused,
+                    self._state.enabled,
+                    self._state.daemon_state,
+                )
             return
 
         self._logger.info("Updating preedit from partial transcript: %s", normalized)
-        self._render_preedit(normalized)
+        self._show_preedit(normalized, "listening")
 
     def handle_final_transcript(self, text: str) -> None:
         """Commit a finalized transcript through IBus only."""
@@ -176,7 +190,7 @@ class DictationEngineController:
 
         if not normalized:
             self._logger.debug("Ignoring empty final transcript")
-            self._clear_preedit(reason="empty-final")
+            self._hide_preedit(reason="empty-final")
             return
 
         if not self._can_commit_final():
@@ -187,11 +201,11 @@ class DictationEngineController:
                 self._state.enabled,
                 self._state.daemon_state,
             )
-            self._clear_preedit(reason="final-without-focus")
+            self._hide_preedit(reason="final-without-focus")
             return
 
         self._logger.info("Committing final transcript through IBus: %s", normalized)
-        self._clear_preedit(reason="final-before-commit")
+        self._hide_preedit(reason="final-before-commit")
         self._adapter.commit_text(normalized)
 
     def handle_error(self, code: str, message: str) -> None:
@@ -202,19 +216,14 @@ class DictationEngineController:
         self._state.daemon_state = STATE_ERROR
         self._state.pending_partial = ""
         self._logger.error("Daemon error occurred: code=%s message=%s", code, message)
-        self._clear_preedit(reason="daemon-error")
+        self._hide_preedit(reason="daemon-error")
 
-    def set_surrounding_text(self, text: str, cursor_pos: int, anchor_pos: int) -> None:
-        """Cache surrounding text for future context-aware behavior."""
-
-        self._state.surrounding_text = text
-        self._state.surrounding_cursor_pos = cursor_pos
-        self._state.surrounding_anchor_pos = anchor_pos
-        self._logger.debug(
-            "Cached surrounding text: cursor=%s anchor=%s length=%s",
-            cursor_pos,
-            anchor_pos,
-            len(text),
+    def _can_render_status(self) -> bool:
+        """Whether it is safe to push any preedit content (animations included)."""
+        return (
+            self._state.enabled
+            and self._state.focused
+            and self._state.daemon_available
         )
 
     def _can_render_live_text(self) -> bool:
@@ -222,7 +231,7 @@ class DictationEngineController:
             self._state.enabled
             and self._state.focused
             and self._state.daemon_available
-            and self._state.daemon_state in {STATE_RECORDING, STATE_TRANSCRIBING}
+            and self._state.daemon_state == STATE_RECORDING
         )
 
     def _can_commit_final(self) -> bool:
@@ -236,7 +245,7 @@ class DictationEngineController:
     def _sync_preedit(self, *, reason: str) -> None:
         if self._state.pending_partial and self._can_render_live_text():
             self._logger.debug("Restoring preedit after %s", reason)
-            self._render_preedit(self._state.pending_partial)
+            self._show_preedit(self._state.pending_partial, "listening")
             return
 
         if self._state.pending_partial:
@@ -245,15 +254,15 @@ class DictationEngineController:
                 reason,
             )
 
-    def _render_preedit(self, text: str) -> None:
+    def _show_preedit(self, partial: str, mode: AnimationMode) -> None:
         self._state.preedit_visible = True
-        self._adapter.update_preedit(text, visible=True, focus_mode="clear")
+        self._adapter.set_preedit(PreeditPresentation(partial=partial, mode=mode))
 
-    def _clear_preedit(self, *, reason: str) -> None:
-        if self._state.preedit_visible or self._state.pending_partial:
-            self._logger.debug("Clearing preedit due to %s", reason)
+    def _hide_preedit(self, *, reason: str) -> None:
+        if self._state.preedit_visible:
+            self._logger.debug("Hiding preedit due to %s", reason)
         self._state.preedit_visible = False
-        self._adapter.update_preedit("", visible=False, focus_mode="clear")
+        self._adapter.set_preedit(None)
 
     @staticmethod
     def _normalize_text(text: str) -> str:

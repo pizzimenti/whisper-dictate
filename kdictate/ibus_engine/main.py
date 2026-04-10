@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import logging
 import sys
-from typing import Any, Sequence
+from typing import Any
 
 import gi
 
@@ -25,10 +24,10 @@ def _startup_engine_runtime() -> tuple[Any, Any, Any]:
     return ibus, bus, factory
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main() -> int:
     """Run the IBus engine main loop."""
 
-    logger = configure_logging("kdictate.ibus")
+    logger = configure_logging("kdictate.ibus", log_file="ibus-engine.log")
     logger.info("Starting IBus engine process for %s", ENGINE_NAME)
 
     try:
