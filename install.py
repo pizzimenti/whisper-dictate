@@ -289,7 +289,7 @@ def download_model(ctx: InstallContext) -> None:
     run_command(
         ctx,
         [
-            ctx.venv_python,
+            ctx.python_bin,
             "-c",
             (
                 "from huggingface_hub import snapshot_download; "
