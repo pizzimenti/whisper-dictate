@@ -33,8 +33,29 @@ def resolve_default_input_device() -> tuple[str, bool]:
 
     if not source_name:
         return ("none", False)
+
+    # If the default is a monitor (speaker loopback), try to find a real
+    # input device before giving up.
     if source_name.endswith(".monitor"):
+        fallback = _find_first_real_input()
+        if fallback is not None:
+            name, description = fallback
+            _LOGGER.info(
+                "Default source %s is a monitor; switching to %s (%s)",
+                source_name, name, description,
+            )
+            try:
+                _run_pactl("set-default-source", name)
+            except Exception:  # noqa: BLE001
+                _LOGGER.warning("Failed to set default source to %s", name)
+            return (description, True)
         return (source_name, False)
+
+    return _describe_source(source_name)
+
+
+def _describe_source(source_name: str) -> tuple[str, bool]:
+    """Look up the human-readable description for a named source."""
 
     try:
         result = _run_pactl("list", "sources")
@@ -50,3 +71,35 @@ def resolve_default_input_device() -> tuple[str, bool]:
         _LOGGER.warning("Failed to resolve input device description: %s", exc)
 
     return (source_name, True)
+
+
+def _find_first_real_input() -> tuple[str, str] | None:
+    """Scan pactl sources for the first non-monitor input device.
+
+    Returns ``(source_name, description)`` or ``None`` if no real input
+    device exists.
+    """
+
+    try:
+        result = _run_pactl("list", "sources", "short")
+    except Exception:  # noqa: BLE001
+        return None
+
+    candidates: list[str] = []
+    for line in result.stdout.strip().splitlines():
+        fields = line.split("\t")
+        if len(fields) >= 2:
+            name = fields[1]
+            if not name.endswith(".monitor"):
+                candidates.append(name)
+
+    if not candidates:
+        return None
+
+    # Return the first real input with its description.
+    for name in candidates:
+        desc, usable = _describe_source(name)
+        if usable:
+            return (name, desc)
+
+    return None
