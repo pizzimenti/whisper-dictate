@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Mapping, NoReturn, Sequence
 
 from kdictate import __version__
+from kdictate.app_metadata import DEFAULT_MODEL_HF_REPO, DEFAULT_MODEL_NAME
 from kdictate.constants import APP_ROOT_ID, DBUS_INTERFACE
 
 SERVICE_NAME = f"{APP_ROOT_ID}.service"
@@ -276,6 +277,32 @@ def install_python_environment(ctx: InstallContext) -> None:
     run_command(ctx, [ctx.pip_bin, "install", "--no-deps", "-e", ctx.runtime_dir], as_user=True)
 
 
+def download_model(ctx: InstallContext) -> None:
+    """Download the Whisper model if it's not already present."""
+
+    model_dir = ctx.runtime_dir / DEFAULT_MODEL_NAME
+    if model_dir.exists():
+        log(f"Model already present at {model_dir}")
+        return
+
+    log(f"Downloading model {DEFAULT_MODEL_HF_REPO} to {model_dir}")
+    run_command(
+        ctx,
+        [
+            ctx.venv_python,
+            "-c",
+            (
+                "from huggingface_hub import snapshot_download; "
+                f"snapshot_download(repo_id={DEFAULT_MODEL_HF_REPO!r}, "
+                f"local_dir={str(model_dir)!r})"
+            ),
+        ],
+        as_user=True,
+    )
+    _chown_home_path(ctx, model_dir)
+    log("Model download complete")
+
+
 def next_preload_engines(current_preload: str, engine_id: str) -> str | None:
     """Return the updated preload list or ``None`` when no change is needed."""
 
@@ -446,8 +473,8 @@ def run_full_install(ctx: InstallContext) -> int:
     require_command("ibus-daemon")
 
     sync_runtime(ctx)
-    # Model is expected at $RUNTIME_DIR/whisper-large-v3-turbo-ct2/.
     install_python_environment(ctx)
+    download_model(ctx)
 
     log("Installing systemd user service")
     install_rendered_file(

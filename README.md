@@ -36,10 +36,12 @@ pip install -r requirements-dev.txt
 
 ### System dictation daemon
 
-On Arch/Manjaro, `install.py` handles the bootstrap path automatically:
+On Arch/Manjaro, `install.py` handles everything — dependencies, venv, model
+download (~780 MB from HuggingFace on first run), systemd/D-Bus/IBus
+registration, and KDE integration:
 
 ```bash
-python3 install.py
+sudo python3 install.py
 ```
 
 It installs `ibus`, sets up the Python environment, registers the
@@ -170,4 +172,4 @@ behavior stays consistent across shells and user services.
 ## Notes
 
 - CPU-only; no CUDA or ROCm required.
-- The model (`whisper-large-v3-turbo`, CTranslate2 int8) is stored at `~/.local/share/kdictate/whisper-large-v3-turbo-ct2/`.
+- The model (`Systran/faster-whisper-large-v3-turbo`, ~780 MB) is downloaded automatically on first install to `~/.local/share/kdictate/whisper-large-v3-turbo-ct2/`. Subsequent installs skip the download if the directory exists.
