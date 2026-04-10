@@ -208,7 +208,6 @@ def initialize_engine_runtime(
         raise IbusEngineError("Unable to connect to the IBus bus")
 
     factory = build_engine_factory(bus=bus, ibus_module=ibus)
-    claim_component_name(bus, ibus_module=ibus)
     return bus, factory
 
 
