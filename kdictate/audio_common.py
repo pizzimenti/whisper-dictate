@@ -1,9 +1,4 @@
-"""Shared Whisper model loading, transcription, and VAD helpers.
-
-Centralizes logic that was previously duplicated across the daemon
-and the eval/research scripts (transcribe.py, benchmark.py,
-eval/sweep.py).
-"""
+"""Whisper model loading, transcription, and VAD helpers for the daemon."""
 
 from __future__ import annotations
 

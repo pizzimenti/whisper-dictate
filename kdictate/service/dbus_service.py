@@ -142,7 +142,7 @@ class SessionDbusService:
     def _default_signal_sender(self, signal_name: str, parameters: tuple[Any, ...]) -> None:
         """Emit a D-Bus signal on the registered connection."""
 
-        Gio, GLib = self._load_gi()
+        _Gio, GLib = self._load_gi()
         if self._connection is None:
             raise DbusServiceError("D-Bus connection is not available")
 
@@ -157,7 +157,7 @@ class SessionDbusService:
             connection = self._connection
             if connection is None:
                 return GLib.SOURCE_REMOVE
-            self._emit_signal_now(signal_name, parameters, connection, Gio, GLib)
+            self._emit_signal_now(signal_name, parameters, connection, GLib)
             return GLib.SOURCE_REMOVE
 
         GLib.idle_add(_emit)
@@ -167,12 +167,10 @@ class SessionDbusService:
         signal_name: str,
         parameters: tuple[Any, ...],
         connection: Any,
-        Gio: Any,
         GLib: Any,
     ) -> None:
         """Emit a signal immediately on the supplied connection."""
 
-        del Gio  # noqa: ARG002 — kept in signature for symmetry with _default_signal_sender
         if signal_name in {"StateChanged", "PartialTranscript", "FinalTranscript"}:
             variant = GLib.Variant("(s)", parameters)
         elif signal_name == "ErrorOccurred":

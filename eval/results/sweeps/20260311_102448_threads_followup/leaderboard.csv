@@ -1,3 +1,0 @@
-rank,name,model_dir,beam_size,cpu_threads,without_timestamps,vad_filter,avg_wer,overall_rtf,speed_x_realtime,mean_decode_seconds,median_decode_seconds,p90_decode_seconds,short_clip_mean_decode_seconds,short_clip_mean_rtf,model_load_seconds
-1,large_v3_turbo_beam1_nots_t6,models/whisper-large-v3-turbo-ct2-int8,1,6,yes,no,0.01614,0.62026,1.612,5.099,5.088,5.258,4.958,1.72467,1.024
-2,distil_medium_beam1_nots_t6,models/distil-medium-en-ct2-int8,1,6,yes,no,0.02491,0.36079,2.772,2.966,2.962,3.05,2.914,1.00954,1.161

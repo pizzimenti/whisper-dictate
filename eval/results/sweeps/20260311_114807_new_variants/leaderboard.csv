@@ -1,7 +1,0 @@
-rank,name,model_dir,beam_size,cpu_threads,without_timestamps,vad_filter,avg_wer,overall_rtf,speed_x_realtime,mean_decode_seconds,median_decode_seconds,p90_decode_seconds,short_clip_mean_decode_seconds,short_clip_mean_rtf,model_load_seconds
-1,distil_large_v3_5_beam1_nots_t6,models/distil-large-v3.5-ct2,1,6,yes,no,0.02747,0.60032,1.666,4.935,4.912,5.12,4.87,1.68956,2.312
-2,distil_large_v3_5_beam1_nots_t12,models/distil-large-v3.5-ct2,1,12,yes,no,0.02747,0.60599,1.65,4.982,4.941,5.225,4.894,1.70234,2.345
-3,whisper_small_en_beam1_nots_t6,models/whisper-small-en-ct2,1,6,yes,no,0.02806,0.16548,6.043,1.361,1.294,1.568,1.201,0.41566,0.692
-4,whisper_small_en_beam1_nots_t12,models/whisper-small-en-ct2,1,12,yes,no,0.02806,0.18168,5.504,1.494,1.397,1.779,1.292,0.45217,1.49
-5,whisper_base_en_beam1_nots_t12,models/whisper-base-en-ct2,1,12,yes,no,0.04364,0.0736,13.587,0.605,0.576,0.703,0.516,0.17862,0.277
-6,whisper_base_en_beam1_nots_t6,models/whisper-base-en-ct2,1,6,yes,no,0.04364,0.0702,14.245,0.577,0.565,0.654,0.53,0.18378,0.136

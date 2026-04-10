@@ -11,6 +11,17 @@ import gi
 gi.require_version("GLib", "2.0")
 from gi.repository import GLib
 
+from kdictate.app_metadata import (
+    APP_AUTHOR,
+    APP_LICENSE,
+    APP_VERSION,
+    DISPLAY_NAME,
+    ENGINE_DESCRIPTION,
+    ENGINE_ICON,
+    ENGINE_LANGUAGE,
+    ENGINE_LAYOUT,
+    TEXTDOMAIN,
+)
 from kdictate.constants import APP_ROOT_ID, DBUS_BUS_NAME, DBUS_INTERFACE, DBUS_OBJECT_PATH
 from kdictate.exceptions import IbusEngineError
 from kdictate.logging_utils import configure_logging
@@ -20,15 +31,11 @@ from kdictate.ibus_engine.dbus_client import DaemonControlBridge, DaemonSignalBr
 COMPONENT_NAME = APP_ROOT_ID
 ENGINE_NAME = DBUS_INTERFACE
 ENGINE_OBJECT_PATH = f"{DBUS_OBJECT_PATH}/engine"
-ENGINE_DESCRIPTION = "Session D-Bus driven dictation engine"
-ENGINE_LONGNAME = "KDictate"
-ENGINE_LANGUAGE = "en"
-ENGINE_LICENSE = "MIT"
-ENGINE_AUTHOR = "Bradley Pizzimenti"
-ENGINE_ICON = "audio-input-microphone"
-ENGINE_LAYOUT = "default"
-ENGINE_VERSION = "0.3"
-ENGINE_TEXTDOMAIN = "kdictate"
+ENGINE_LONGNAME = DISPLAY_NAME
+ENGINE_LICENSE = APP_LICENSE
+ENGINE_AUTHOR = APP_AUTHOR
+ENGINE_VERSION = APP_VERSION
+ENGINE_TEXTDOMAIN = TEXTDOMAIN
 LOGGER_NAME = "kdictate.ibus"
 
 
@@ -191,12 +198,10 @@ def claim_component_name(bus: Any, ibus_module: ModuleType | None = None) -> int
 
 
 def initialize_engine_runtime(
-    executable_path: str,
     ibus_module: ModuleType | None = None,
 ) -> tuple[Any, Any]:
     """Connect to IBus and export the factory for the installed engine path."""
 
-    del executable_path
     ibus = ibus_module or load_ibus_module()
     bus = ibus.Bus.new()
     if not bus.is_connected():

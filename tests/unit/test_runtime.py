@@ -8,9 +8,11 @@ from unittest.mock import patch
 
 from kdictate.runtime import (
     RuntimePaths,
+    atomic_write_text,
     default_runtime_paths,
     read_last_text,
     read_state,
+    wait_for_state,
     write_last_text,
     write_state,
 )
@@ -39,3 +41,31 @@ class RuntimeHelpersTest(unittest.TestCase):
                 paths = default_runtime_paths(uid=1234)
         self.assertEqual(paths.state_file, Path(tmpdir) / "kdictate-1234.state")
         self.assertEqual(paths.last_text_file, Path(tmpdir) / "kdictate-1234.last.txt")
+
+    def test_default_runtime_paths_error_mentions_uid(self) -> None:
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch("pathlib.Path.is_dir", return_value=False),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "/run/user/1234"):
+                default_runtime_paths(uid=1234)
+
+    def test_write_state_is_atomic_and_leaves_no_tmp_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_file = Path(tmpdir) / "daemon.state"
+            write_state(state_file, "recording")
+            self.assertEqual(state_file.read_text(encoding="utf-8"), "recording\n")
+            self.assertFalse((Path(tmpdir) / "daemon.state.tmp").exists())
+
+    def test_atomic_write_text_overwrites_target(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "last.txt"
+            atomic_write_text(target, "hello")
+            atomic_write_text(target, "world")
+            self.assertEqual(target.read_text(encoding="utf-8"), "world")
+
+    def test_wait_for_state_times_out_when_target_is_not_reached(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_file = Path(tmpdir) / "daemon.state"
+            write_state(state_file, "idle")
+            self.assertIsNone(wait_for_state(state_file, {"recording"}, 0.01, poll_interval=0.001))

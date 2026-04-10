@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Runtime selection helpers shared by all CLI entrypoints.
 
 Design constraints:
@@ -7,6 +5,8 @@ Design constraints:
 - Make device/precision choices explicit so scripts can print and verify runtime.
 - Keep thread settings predictable by aligning BLAS/OpenMP thread vars.
 """
+
+from __future__ import annotations
 
 import os
 
@@ -26,16 +26,16 @@ def recommended_cpu_threads() -> int:
     transcription.
     """
     if psutil is not None:
+        logical = psutil.cpu_count(logical=True)
         physical = psutil.cpu_count(logical=False)
-        logical = psutil.cpu_count(logical=True) or os.cpu_count() or 1
     else:
+        logical = os.cpu_count()
         physical = None
-        logical = os.cpu_count() or 1
     if logical and logical > 0:
         return logical
     if physical and physical > 0:
         return physical
-    return max(1, os.cpu_count() or 1)
+    return 1
 
 
 def recommended_shortform_cpu_threads() -> int:
@@ -58,13 +58,12 @@ def recommended_shortform_cpu_threads() -> int:
     return max(1, logical // 2)
 
 
-def resolve_runtime(device: str | None, compute_type: str | None, cpu_threads: int | None) -> dict:
+def resolve_runtime(_device: str | None, compute_type: str | None, cpu_threads: int | None) -> dict:
     """Resolve effective runtime options under a CPU-only policy.
 
     Any `device` value currently resolves to CPU. We keep the argument for
     CLI compatibility and future extension without breaking call sites.
     """
-    del device
     resolved_device = "cpu"
 
     if compute_type:

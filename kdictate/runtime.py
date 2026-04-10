@@ -35,28 +35,35 @@ class RuntimePaths:
     last_text_file: Path
 
 
-def default_runtime_paths(*, uid: int | None = None) -> RuntimePaths:
-    """Return the default XDG runtime file locations for the current user."""
+def resolve_runtime_dir(*, uid: int | None = None) -> Path:
+    """Return the safe XDG runtime directory for the selected user."""
 
     actual_uid = os.getuid() if uid is None else uid
     xdg = os.environ.get("XDG_RUNTIME_DIR")
     if xdg:
-        runtime_dir = Path(xdg)
-    else:
-        # XDG_RUNTIME_DIR is always set on a live systemd desktop session, but
-        # may be absent in minimal or headless environments.  /run/user/<uid>
-        # is the canonical backing directory that systemd creates for each user
-        # and is only accessible to that user (mode 700), so it is a safe
-        # second choice.  Falling back to /tmp would expose state files to
-        # other users on multi-user systems.
-        fallback = Path(f"/run/user/{actual_uid}")
-        if fallback.is_dir():
-            runtime_dir = fallback
-        else:
-            raise RuntimeError(
-                "XDG_RUNTIME_DIR is not set and /run/user/{uid} does not exist; "
-                "cannot determine a safe runtime directory"
-            )
+        return Path(xdg)
+
+    # XDG_RUNTIME_DIR is always set on a live systemd desktop session, but
+    # may be absent in minimal or headless environments. /run/user/<uid>
+    # is the canonical backing directory that systemd creates for each user
+    # and is only accessible to that user (mode 700), so it is a safe
+    # second choice. Falling back to /tmp would expose state files to
+    # other users on multi-user systems.
+    fallback = Path(f"/run/user/{actual_uid}")
+    if fallback.is_dir():
+        return fallback
+
+    raise RuntimeError(
+        f"XDG_RUNTIME_DIR is not set and /run/user/{actual_uid} does not exist; "
+        "cannot determine a safe runtime directory"
+    )
+
+
+def default_runtime_paths(*, uid: int | None = None) -> RuntimePaths:
+    """Return the default XDG runtime file locations for the current user."""
+
+    actual_uid = os.getuid() if uid is None else uid
+    runtime_dir = resolve_runtime_dir(uid=actual_uid)
     return RuntimePaths(
         state_file=runtime_dir / f"kdictate-{actual_uid}.state",
         last_text_file=runtime_dir / f"kdictate-{actual_uid}.last.txt",
@@ -72,6 +79,15 @@ def read_state(state_file: Path) -> str:
     return value or STATE_MISSING
 
 
+def atomic_write_text(path: Path, value: str) -> None:
+    """Persist text atomically via write-then-rename."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(value, encoding="utf-8")
+    tmp.replace(path)
+
+
 def write_state(state_file: Path, value: str) -> None:
     """Persist the daemon state in a newline-terminated runtime file.
 
@@ -81,10 +97,7 @@ def write_state(state_file: Path, value: str) -> None:
     helpers would treat as an unrecognized state and spin on.
     """
 
-    state_file.parent.mkdir(parents=True, exist_ok=True)
-    tmp = state_file.with_suffix(state_file.suffix + ".tmp")
-    tmp.write_text(f"{value}\n", encoding="utf-8")
-    tmp.replace(state_file)
+    atomic_write_text(state_file, f"{value}\n")
 
 
 def read_last_text(last_text_file: Path) -> str:
@@ -98,8 +111,7 @@ def read_last_text(last_text_file: Path) -> str:
 def write_last_text(last_text_file: Path, value: str) -> None:
     """Persist the latest transcript text for control helpers."""
 
-    last_text_file.parent.mkdir(parents=True, exist_ok=True)
-    last_text_file.write_text(value, encoding="utf-8")
+    atomic_write_text(last_text_file, value)
 
 
 def wait_for_state(

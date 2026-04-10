@@ -7,11 +7,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
+from kdictate.daemon_profiles import (
+    DAEMON_PROFILE_CHOICES,
+    DEFAULT_DAEMON_PROFILE,
+    daemon_arg_defaults,
+)
 from kdictate.runtime import RuntimePaths, default_runtime_paths
-from kdictate.runtime_profile import recommended_shortform_cpu_threads
-
-
-DEFAULT_MODEL_DIR = Path(__file__).resolve().parent.parent / "models/whisper-large-v3-turbo-ct2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,48 +64,55 @@ class DictationConfig:
         )
 
 
-def build_arg_parser() -> argparse.ArgumentParser:
+def build_arg_parser(*, profile: str = DEFAULT_DAEMON_PROFILE) -> argparse.ArgumentParser:
     """Create the daemon argument parser."""
 
     runtime_paths = default_runtime_paths()
+    defaults = daemon_arg_defaults(profile)
     parser = argparse.ArgumentParser(
         description="KDictate daemon backed by session D-Bus."
     )
     parser.add_argument(
+        "--profile",
+        choices=DAEMON_PROFILE_CHOICES,
+        default=profile,
+        help="Named daemon tuning profile.",
+    )
+    parser.add_argument(
         "--model-dir",
-        default=str(DEFAULT_MODEL_DIR),
+        default=str(defaults["model_dir"]),
         help="Path to the CTranslate2 model directory.",
     )
-    parser.add_argument("--language", default="en", help="Language code for transcription.")
-    parser.add_argument("--sample-rate", type=int, default=16000, help="Microphone sample rate.")
-    parser.add_argument("--beam-size", type=int, default=1, help="Whisper beam size.")
+    parser.add_argument("--language", default=defaults["language"], help="Language code for transcription.")
+    parser.add_argument("--sample-rate", type=int, default=defaults["sample_rate"], help="Microphone sample rate.")
+    parser.add_argument("--beam-size", type=int, default=defaults["beam_size"], help="Whisper beam size.")
     parser.add_argument(
         "--condition-on-previous-text",
         action=argparse.BooleanOptionalAction,
-        default=False,
+        default=defaults["condition_on_previous_text"],
         help="Condition on previous text between segments.",
     )
     parser.add_argument(
         "--vad-filter",
         action=argparse.BooleanOptionalAction,
-        default=False,
+        default=defaults["vad_filter"],
         help="Enable Whisper's built-in VAD filtering before decode.",
     )
     parser.add_argument(
         "--no-speech-threshold",
         type=float,
-        default=0.6,
+        default=defaults["no_speech_threshold"],
         help="Reject segments below this no-speech confidence threshold.",
     )
     parser.add_argument(
         "--cpu-threads",
         type=int,
-        default=recommended_shortform_cpu_threads(),
+        default=defaults["cpu_threads"],
         help="Override CPU thread count.",
     )
     parser.add_argument(
         "--compute-type",
-        default="int8",
+        default=defaults["compute_type"],
         choices=("float32", "float16", "int8", "int8_float16"),
         help="Compute type used by faster-whisper.",
     )
@@ -121,43 +129,57 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--block-ms",
         type=int,
-        default=30,
+        default=defaults["block_ms"],
         help="Audio capture block duration in milliseconds.",
     )
     parser.add_argument(
         "--energy-threshold",
         type=float,
-        default=600.0,
+        default=defaults["energy_threshold"],
         help="RMS threshold for speech detection.",
     )
     parser.add_argument(
         "--silence-ms",
         type=int,
-        default=220,
+        default=defaults["silence_ms"],
         help="Silence duration that commits the current utterance.",
     )
     parser.add_argument(
         "--min-speech-ms",
         type=int,
-        default=180,
+        default=defaults["min_speech_ms"],
         help="Minimum speech duration required to transcribe an utterance.",
     )
     parser.add_argument(
         "--start-speech-ms",
         type=int,
-        default=90,
+        default=defaults["start_speech_ms"],
         help="Consecutive voiced duration required before an utterance starts.",
     )
     parser.add_argument(
         "--max-utterance-s",
         type=float,
-        default=2.5,
+        default=defaults["max_utterance_s"],
         help="Force-commit an utterance when it reaches this length.",
     )
     return parser
 
 
+def _parse_profile(argv: Sequence[str] | None = None) -> str:
+    """Read the selected daemon profile before building the full parser."""
+
+    bootstrap = argparse.ArgumentParser(add_help=False)
+    bootstrap.add_argument(
+        "--profile",
+        choices=DAEMON_PROFILE_CHOICES,
+        default=DEFAULT_DAEMON_PROFILE,
+    )
+    namespace, _ = bootstrap.parse_known_args(argv)
+    return namespace.profile
+
+
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     """Parse daemon arguments."""
 
-    return build_arg_parser().parse_args(argv)
+    profile = _parse_profile(argv)
+    return build_arg_parser(profile=profile).parse_args(argv)

@@ -4,12 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kdictate"
-version = "0.4.0"
 description = "Local Whisper dictation for KDE Plasma Wayland via IBus"
 authors = [{name = "Bradley Pizzimenti"}]
 license = {text = "MIT"}
 requires-python = ">=3.11"
-dynamic = ["dependencies"]
+dynamic = ["version", "dependencies"]
 
 [project.scripts]
 kdictate-daemon = "kdictate.core.daemon:main"
@@ -20,4 +19,5 @@ ibus-engine-kdictate = "kdictate.ibus_engine.main:main"
 include = ["kdictate*"]
 
 [tool.setuptools.dynamic]
+version = {attr = "kdictate.__version__"}
 dependencies = {file = ["requirements.txt"]}

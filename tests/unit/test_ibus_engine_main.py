@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import io
 from unittest import mock
 import unittest
 
 from kdictate.ibus_engine import main as ibus_main
+from kdictate.exceptions import IbusEngineError
 
 
 class IbusEngineMainTests(unittest.TestCase):
@@ -26,3 +28,31 @@ class IbusEngineMainTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
         init_runtime.assert_called_once_with("/tmp/ibus-engine-kdictate", ibus_module=fake_ibus)
+
+    def test_main_returns_one_for_ibus_engine_error(self) -> None:
+        stderr = io.StringIO()
+        logger = mock.Mock()
+
+        with (
+            mock.patch.object(ibus_main, "configure_logging", return_value=logger),
+            mock.patch.object(ibus_main, "_startup_engine_runtime", side_effect=IbusEngineError("bad ibus state")),
+            mock.patch("sys.stderr", stderr),
+        ):
+            result = ibus_main.main(["/tmp/ibus-engine-kdictate"])
+
+        self.assertEqual(result, 1)
+        self.assertIn("bad ibus state", stderr.getvalue())
+
+    def test_main_returns_one_for_unexpected_exception(self) -> None:
+        stderr = io.StringIO()
+        logger = mock.Mock()
+
+        with (
+            mock.patch.object(ibus_main, "configure_logging", return_value=logger),
+            mock.patch.object(ibus_main, "_startup_engine_runtime", side_effect=RuntimeError("boom")),
+            mock.patch("sys.stderr", stderr),
+        ):
+            result = ibus_main.main(["/tmp/ibus-engine-kdictate"])
+
+        self.assertEqual(result, 1)
+        self.assertIn("IBus engine startup failed: boom", stderr.getvalue())

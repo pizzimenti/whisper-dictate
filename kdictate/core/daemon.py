@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import logging
 import queue
+import shutil
 import signal
+import subprocess
 import threading
+import time
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol
 
@@ -46,17 +49,17 @@ class DaemonEventSink(Protocol):
 class _NullEventSink:
     """No-op sink used when the daemon runs without an attached transport."""
 
-    def state_changed(self, state: str) -> None:
-        del state
+    def state_changed(self, _state: str) -> None:
+        pass
 
-    def partial_transcript(self, text: str) -> None:
-        del text
+    def partial_transcript(self, _text: str) -> None:
+        pass
 
-    def final_transcript(self, text: str) -> None:
-        del text
+    def final_transcript(self, _text: str) -> None:
+        pass
 
-    def error_occurred(self, code: str, message: str) -> None:
-        del code, message
+    def error_occurred(self, _code: str, _message: str) -> None:
+        pass
 
 
 @dataclass(slots=True)
@@ -127,6 +130,7 @@ class DictationDaemon:
         self._stop_vad = threading.Event()
         self._cancel_start = threading.Event()
         self._pending_start = threading.Event()
+        self._last_error_notify_time: float = 0.0
         self._handles = _ThreadHandles()
         # Session generation: bumped every time the wedge-recovery path
         # rotates the session primitives. Each decode worker captures the
@@ -234,11 +238,37 @@ class DictationDaemon:
         self._logger.info("state changed to %s", state)
         self._event_sink.state_changed(state)
 
+    _ERROR_NOTIFY_COOLDOWN_S: float = 10.0
+
     def _emit_error(self, code: str, message: str) -> None:
         """Publish a structured failure event."""
 
         self._logger.error("%s: %s", code, message)
         self._event_sink.error_occurred(code, message)
+
+    def _notify_error(self, summary: str, body: str) -> None:
+        """Show a desktop notification for a user-facing error.
+
+        Rate-limited so rapid repeated toggles don't spam the desktop.
+        Silently skipped if notify-send is not available.
+        """
+
+        now = time.monotonic()
+        if now - self._last_error_notify_time < self._ERROR_NOTIFY_COOLDOWN_S:
+            return
+        self._last_error_notify_time = now
+        notify_send = shutil.which("notify-send")
+        if notify_send is None:
+            return
+        try:
+            subprocess.Popen(
+                [notify_send, "--app-name=KDictate", "--icon=audio-input-microphone",
+                 "--urgency=normal", summary, body],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except OSError:
+            pass
 
     def _reset_session_buffers(self) -> None:
         """Clear transient queues and accumulated transcript fragments."""
@@ -479,7 +509,6 @@ class DictationDaemon:
                 self._logger.info("start deferred until transcription completes")
                 return
             self._starting = True
-            self._transcribing = False
             self._cancel_start.clear()
             self._reset_session_buffers()
             self._handles = _ThreadHandles()
@@ -497,6 +526,7 @@ class DictationDaemon:
                 self._cancel_start.clear()
             self._write_state(STATE_ERROR)
             self._emit_error("audio_input_unavailable", str(exc))
+            self._notify_error("Microphone unavailable", str(exc))
             self._write_state(STATE_IDLE)
             return
         if not mic_usable:
@@ -506,6 +536,7 @@ class DictationDaemon:
             error = AudioInputError(f"No usable input device: {mic_name}")
             self._write_state(STATE_ERROR)
             self._emit_error("audio_input_unavailable", str(error))
+            self._notify_error("Microphone unavailable", f"Default source is {mic_name}, which is not an input device.")
             self._write_state(STATE_IDLE)
             return
 

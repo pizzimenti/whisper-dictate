@@ -1,4 +1,4 @@
 [D-BUS Service]
 Name=io.github.pizzimenti.KDictate1
-Exec=@@REPO_DIR@@/.venv/bin/python -m kdictate.core --compute-type int8 --beam-size 1 --vad-filter --no-condition-on-previous-text --no-speech-threshold 0.6 --silence-ms 500 --max-utterance-s 8
+Exec=@@REPO_DIR@@/.venv/bin/kdictate-daemon --profile service
 SystemdService=io.github.pizzimenti.KDictate.service

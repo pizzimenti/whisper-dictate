@@ -3,7 +3,7 @@
   <name>io.github.pizzimenti.KDictate</name>
   <description>KDictate IBus component metadata</description>
   <exec>@@ENGINE_EXEC@@</exec>
-  <version>0.3</version>
+  <version>@@APP_VERSION@@</version>
   <author>Bradley Pizzimenti</author>
   <license>MIT</license>
   <homepage>https://github.com/pizzimenti/kdictate</homepage>
@@ -23,7 +23,7 @@
       <hotkeys></hotkeys>
       <symbol></symbol>
       <setup></setup>
-      <version>0.3</version>
+      <version>@@APP_VERSION@@</version>
       <textdomain>kdictate</textdomain>
       <icon_prop_key></icon_prop_key>
       <rank>1</rank>
