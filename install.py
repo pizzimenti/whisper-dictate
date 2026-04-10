@@ -425,13 +425,16 @@ def refresh_ibus_registry(ctx: InstallContext) -> None:
         )
     }
     run_command(ctx, ["ibus", "write-cache"], as_user=True, env=ibus_env, quiet=True)
-    # Kill the existing daemon and start a fresh one with our component path.
-    # `ibus restart` under sudo sometimes kills the old daemon but fails to
-    # start the replacement. Explicit kill + start is more reliable.
-    run_command(ctx, ["bash", "-c", "pkill -f ibus-daemon 2>/dev/null; true"],
-                as_user=True, check=False)
-    run_command(ctx, ["bash", "-c", "ibus-daemon -drx >/dev/null 2>&1"],
-                as_user=True, env=ibus_env, check=False)
+    # Restart ibus-daemon so it picks up the new component from the cache.
+    # Use `ibus restart` which replaces the running daemon in-place,
+    # preserving the Wayland panel integration that KWin set up at login.
+    # If no daemon is running (first install before login), start one.
+    result = run_command(
+        ctx, ["ibus", "restart"], as_user=True, env=ibus_env, quiet=True, check=False,
+    )
+    if result.returncode != 0:
+        run_command(ctx, ["bash", "-c", "ibus-daemon -drx >/dev/null 2>&1"],
+                    as_user=True, env=ibus_env, check=False)
 
 
 def reload_systemd_user(ctx: InstallContext) -> None:
@@ -446,7 +449,10 @@ def print_summary(ctx: InstallContext) -> None:
     """Print the install result summary."""
 
     print(f"\n  \U0001f389 KDictate {__version__} installed successfully!")
-    print(f"     Ctrl+Space to toggle dictation.")
+    print()
+    print("  \U0001f4ac On first install, sign out and back in so KWin")
+    print("     picks up the IBus Wayland input method.")
+    print("     Then use Ctrl+Space to toggle dictation.")
     print()
 
 
