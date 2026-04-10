@@ -40,7 +40,7 @@ class ContractTests(unittest.TestCase):
         methods = [node.attrib["name"] for node in interface.findall("method")]
         signals = [node.attrib["name"] for node in interface.findall("signal")]
 
-        self.assertEqual(methods, ["Start", "Stop", "Toggle", "GetState", "GetLastText", "Ping"])
+        self.assertEqual(methods, ["Start", "Stop", "Toggle", "GetState", "GetLastText", "GetSnapshot", "Ping"])
         self.assertEqual(signals, ["StateChanged", "PartialTranscript", "FinalTranscript", "ErrorOccurred"])
 
         get_state = interface.find("method[@name='GetState']")

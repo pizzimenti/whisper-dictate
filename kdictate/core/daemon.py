@@ -124,6 +124,8 @@ class DictationDaemon:
         self._transcribing = False
         self._state = STATE_IDLE
         self._last_text = ""
+        self._last_error_code = ""
+        self._last_error_message = ""
         self._streamed_text: list[str] = []
         self._audio_queue: queue.Queue[Any] = queue.Queue(maxsize=AUDIO_QUEUE_MAXSIZE)
         self._utterance_queue: queue.Queue[Any] = queue.Queue(maxsize=UTTERANCE_QUEUE_MAXSIZE)
@@ -234,6 +236,9 @@ class DictationDaemon:
 
         with self._lock:
             self._state = state
+            if state != STATE_ERROR:
+                self._last_error_code = ""
+                self._last_error_message = ""
         write_state(self.runtime_paths.state_file, state)
         self._logger.info("state changed to %s", state)
         self._event_sink.state_changed(state)
@@ -241,8 +246,11 @@ class DictationDaemon:
     _ERROR_NOTIFY_COOLDOWN_S: float = 10.0
 
     def _emit_error(self, code: str, message: str) -> None:
-        """Publish a structured failure event."""
+        """Publish a structured failure event and record for snapshot."""
 
+        with self._lock:
+            self._last_error_code = code
+            self._last_error_message = message
         self._logger.error("%s: %s", code, message)
         self._event_sink.error_occurred(code, message)
 
@@ -781,6 +789,21 @@ class DictationDaemon:
 
         with self._lock:
             return self._last_text
+
+    def get_snapshot(self) -> tuple[str, str, str, str, str]:
+        """Return a coarse session snapshot for restart-tolerant consumers.
+
+        Returns (state, active_partial, last_final, error_code, error_message).
+        """
+
+        with self._lock:
+            return (
+                self._state,
+                " ".join(self._streamed_text).strip(),
+                self._last_text,
+                self._last_error_code,
+                self._last_error_message,
+            )
 
     def ping(self) -> str:
         """Return a liveness marker for D-Bus callers."""

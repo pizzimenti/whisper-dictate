@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=KDictate HUD
+Comment=Dictation feedback overlay for KDictate
+Exec=@@HUD_EXEC@@
+TryExec=@@HUD_EXEC@@
+Icon=audio-input-microphone
+NoDisplay=true
+Terminal=false
+StartupNotify=false
+OnlyShowIn=KDE;
+X-KDE-autostart-after=panel
+X-KDE-autostart-phase=2

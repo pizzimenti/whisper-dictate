@@ -101,6 +101,9 @@ class FakeDbusService:
         self.bus = FakeSignalBus()
         self.state = STATE_IDLE
         self.last_text = ""
+        self.last_error_code = ""
+        self.last_error_message = ""
+        self.active_partial = ""
         self.calls: list[str] = []
 
     def start(self) -> None:
@@ -146,6 +149,13 @@ class FakeDbusService:
 
         self.calls.append("GetLastText")
         return self.last_text
+
+    def get_snapshot(self) -> tuple[str, str, str, str, str]:
+        """Return a coarse session snapshot."""
+
+        self.calls.append("GetSnapshot")
+        return (self.state, self.active_partial, self.last_text,
+                self.last_error_code, self.last_error_message)
 
     def ping(self) -> str:
         """Return the expected health-check response."""

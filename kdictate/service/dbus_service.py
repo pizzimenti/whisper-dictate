@@ -209,6 +209,15 @@ class SessionDbusService:
 
         self._signal_sender("ErrorOccurred", (code, message))
 
+    # Maps method names to their GVariant return signatures.
+    # Methods not listed here return no value.
+    _RETURN_SIGNATURES: dict[str, str] = {
+        "GetState": "(s)",
+        "GetLastText": "(s)",
+        "GetSnapshot": "(sssss)",
+        "Ping": "(s)",
+    }
+
     def _dispatch(self, method_name: str) -> tuple[Any, ...]:
         """Invoke a backend method and normalize the return shape."""
 
@@ -218,12 +227,17 @@ class SessionDbusService:
             "Toggle": getattr(self._backend, "toggle", None),
             "GetState": getattr(self._backend, "get_state", None),
             "GetLastText": getattr(self._backend, "get_last_text", None),
+            "GetSnapshot": getattr(self._backend, "get_snapshot", None),
             "Ping": getattr(self._backend, "ping", None),
         }
         handler = method_map.get(method_name)
         if handler is None:
             raise DbusServiceError(f"Unsupported method: {method_name}")
         result = handler()
+        if method_name == "GetSnapshot":
+            if result is None:
+                return ("", "", "", "", "")
+            return tuple(result)
         if method_name in {"GetState", "GetLastText", "Ping"}:
             return ("" if result is None else result,)
         return ()
@@ -251,8 +265,9 @@ class SessionDbusService:
         Gio, GLib = self._load_gi()
         try:
             result = self._dispatch(method_name)
-            if result:
-                invocation.return_value(GLib.Variant("(s)", result))
+            signature = self._RETURN_SIGNATURES.get(method_name)
+            if result and signature:
+                invocation.return_value(GLib.Variant(signature, result))
             else:
                 invocation.return_value(None)
         except KDictateError as exc:

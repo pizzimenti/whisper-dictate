@@ -20,6 +20,7 @@ SERVICE_NAME = f"{APP_ROOT_ID}.service"
 DBUS_SERVICE_NAME = f"{DBUS_INTERFACE}.service"
 IBUS_COMPONENT_NAME = f"{APP_ROOT_ID}.component.xml"
 TOGGLE_DESKTOP_NAME = f"{APP_ROOT_ID}Toggle.desktop"
+HUD_DESKTOP_NAME = f"{APP_ROOT_ID}Hud.desktop"
 IBUS_ENV_FILE_NAME = "60-kdictate-ibus.conf"
 PLASMA_ENV_SCRIPT_NAME = "kdictate-plasma-wayland.sh"
 KDE_VIRTUAL_KEYBOARD_DESKTOP = Path(
@@ -63,10 +64,15 @@ class InstallContext:
         return self.venv_dir / "bin" / "ibus-engine-kdictate"
 
     @property
+    def hud_exec(self) -> Path:
+        return self.venv_dir / "bin" / "kdictate-hud"
+
+    @property
     def replacements(self) -> Mapping[str, str]:
         return {
             "@@REPO_DIR@@": str(self.runtime_dir),
             "@@ENGINE_EXEC@@": str(self.engine_exec),
+            "@@HUD_EXEC@@": str(self.hud_exec),
             "@@HOME@@": str(self.home),
             "@@APP_VERSION@@": __version__,
         }
@@ -137,17 +143,14 @@ def build_context() -> InstallContext:
     )
 
 
-def run_command(
+def _resolve_command(
     ctx: InstallContext,
     command: Sequence[str | Path],
     *,
     as_user: bool = False,
     env: Mapping[str, str] | None = None,
-    capture_output: bool = False,
-    quiet: bool = False,
-    check: bool = True,
-) -> subprocess.CompletedProcess[str]:
-    """Run a subprocess with optional privilege drop back to the user."""
+) -> tuple[list[str], dict[str, str] | None]:
+    """Build the final argv and environment for a subprocess call."""
 
     args = [str(part) for part in command]
     if as_user and ctx.needs_user_shell:
@@ -166,11 +169,26 @@ def run_command(
             *[f"{key}={value}" for key, value in user_env.items()],
             *args,
         ]
-        proc_env = None
-    else:
-        proc_env = os.environ.copy()
-        if env:
-            proc_env.update(env)
+        return args, None
+    proc_env = os.environ.copy()
+    if env:
+        proc_env.update(env)
+    return args, proc_env
+
+
+def run_command(
+    ctx: InstallContext,
+    command: Sequence[str | Path],
+    *,
+    as_user: bool = False,
+    env: Mapping[str, str] | None = None,
+    capture_output: bool = False,
+    quiet: bool = False,
+    check: bool = True,
+) -> subprocess.CompletedProcess[str]:
+    """Run a subprocess with optional privilege drop back to the user."""
+
+    args, proc_env = _resolve_command(ctx, command, as_user=as_user, env=env)
     if quiet and not capture_output:
         capture_output = True
     return subprocess.run(
@@ -181,6 +199,44 @@ def run_command(
         capture_output=capture_output,
         env=proc_env,
     )
+
+
+def run_command_with_status(
+    ctx: InstallContext,
+    command: Sequence[str | Path],
+    *,
+    as_user: bool = False,
+    env: Mapping[str, str] | None = None,
+) -> None:
+    """Run a command, showing only the latest output line as a live status."""
+
+    args, proc_env = _resolve_command(ctx, command, as_user=as_user, env=env)
+    cols = shutil.get_terminal_size().columns
+    prefix = "      "
+    max_width = cols - len(prefix) - 1
+
+    proc = subprocess.Popen(
+        args,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        encoding="utf-8",
+        errors="replace",
+        env=proc_env,
+        bufsize=1,
+    )
+    try:
+        for line in proc.stdout:
+            stripped = line.strip()
+            if stripped:
+                display = stripped[:max_width]
+                padding = max_width - len(display)
+                print(f"\r{prefix}{display}{' ' * padding}", end="", flush=True)
+    finally:
+        proc.stdout.close()
+        returncode = proc.wait()
+    print(f"\r{' ' * cols}\r", end="", flush=True)
+    if returncode != 0:
+        raise subprocess.CalledProcessError(returncode, args)
 
 
 def _chown_home_path(ctx: InstallContext, path: Path) -> None:
@@ -289,9 +345,13 @@ def sync_runtime(ctx: InstallContext) -> None:
 def install_python_environment(ctx: InstallContext) -> None:
     """Create the runtime venv and install dependencies plus the editable package."""
 
+    log("creating virtual environment")
     run_command(ctx, ["python3", "-m", "venv", str(ctx.venv_dir)], as_user=True, quiet=True)
+    log("upgrading pip")
     run_command(ctx, [ctx.pip_bin, "install", "--upgrade", "pip"], as_user=True, quiet=True)
-    run_command(ctx, [ctx.pip_bin, "install", "-r", ctx.runtime_dir / "requirements.txt"], as_user=True, quiet=True)
+    log("installing dependencies")
+    run_command_with_status(ctx, [ctx.pip_bin, "install", "-r", ctx.runtime_dir / "requirements.txt"], as_user=True)
+    log("installing kdictate package")
     run_command(ctx, [ctx.pip_bin, "install", "--no-deps", "-e", ctx.runtime_dir], as_user=True, quiet=True)
 
 
@@ -522,6 +582,7 @@ def run_full_install(ctx: InstallContext) -> int:
     step_done()
 
     step("Setting up Python environment")
+    print(flush=True)
     install_python_environment(ctx)
     step_done()
 
@@ -552,6 +613,8 @@ def run_full_install(ctx: InstallContext) -> int:
                     ctx.home / ".config/plasma-workspace/env" / PLASMA_ENV_SCRIPT_NAME)
     install_rendered_file(ctx, ctx.script_dir / "packaging" / TOGGLE_DESKTOP_NAME,
                           ctx.home / ".local/share/applications" / TOGGLE_DESKTOP_NAME)
+    install_rendered_file(ctx, ctx.script_dir / "packaging" / HUD_DESKTOP_NAME,
+                          ctx.home / ".config/autostart" / HUD_DESKTOP_NAME)
     if shutil.which("kbuildsycoca6") is not None:
         run_command(ctx, ["kbuildsycoca6", "--noincremental"], as_user=True, quiet=True, check=False)
     register_global_shortcut(ctx)

@@ -18,6 +18,13 @@ DBUS_INTROSPECTION_XML = f"""\
     <method name="GetLastText">
       <arg direction="out" name="text" type="s" />
     </method>
+    <method name="GetSnapshot">
+      <arg direction="out" name="state" type="s" />
+      <arg direction="out" name="active_partial" type="s" />
+      <arg direction="out" name="last_final" type="s" />
+      <arg direction="out" name="error_code" type="s" />
+      <arg direction="out" name="error_message" type="s" />
+    </method>
     <method name="Ping">
       <arg direction="out" name="response" type="s" />
     </method>

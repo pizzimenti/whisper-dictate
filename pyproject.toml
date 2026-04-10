@@ -14,6 +14,7 @@ dynamic = ["version", "dependencies"]
 kdictate-daemon = "kdictate.core.daemon:main"
 kdictatectl = "kdictate.cli.dictatectl:main"
 ibus-engine-kdictate = "kdictate.ibus_engine.main:main"
+kdictate-hud = "kdictate.hud.main:main"
 
 [tool.setuptools.packages.find]
 include = ["kdictate*"]
