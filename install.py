@@ -72,7 +72,7 @@ class InstallContext:
         }
 
 
-_TOTAL_STEPS = 11
+_TOTAL_STEPS = 12
 _current_step = 0
 
 
@@ -83,18 +83,18 @@ def log(message: str) -> None:
 
 
 def step(message: str) -> None:
-    """Print a numbered progress step."""
+    """Print a numbered progress step (no newline — step_done completes the line)."""
 
     global _current_step  # noqa: PLW0603
     _current_step += 1
-    print(f"\n  \U0001f4e6 [{_current_step}/{_TOTAL_STEPS}] {message}...")
+    print(f"  [{_current_step}/{_TOTAL_STEPS}] {message}...", end="", flush=True)
 
 
 def step_done(detail: str = "") -> None:
-    """Mark the current step as complete."""
+    """Complete the current step line with a checkmark."""
 
-    suffix = f"  {detail}" if detail else ""
-    print(f"  \u2705 done{suffix}")
+    suffix = f" ({detail})" if detail else ""
+    print(f" \u2705{suffix}")
 
 
 def die(message: str) -> NoReturn:
@@ -425,14 +425,16 @@ def refresh_ibus_registry(ctx: InstallContext) -> None:
         )
     }
     run_command(ctx, ["ibus", "write-cache"], as_user=True, env=ibus_env, quiet=True)
-    # ibus-daemon -drx forks; the child's output bypasses subprocess capture,
-    # so redirect fds at the shell level to keep the installer output clean.
+    # Use `ibus restart` to replace the running daemon in-place rather than
+    # spawning a second one with `ibus-daemon -drx`. The session's ibus-daemon
+    # (launched at login) is the one clients talk to; a new fork just creates
+    # a duplicate that the clients ignore.
     run_command(
         ctx,
-        ["bash", "-c", "ibus-daemon -drx -r -t refresh >/dev/null 2>&1"],
+        ["bash", "-c", "ibus restart >/dev/null 2>&1"],
         as_user=True,
         env=ibus_env,
-        quiet=True,
+        check=False,
     )
 
 
@@ -447,11 +449,8 @@ def reload_systemd_user(ctx: InstallContext) -> None:
 def print_summary(ctx: InstallContext) -> None:
     """Print the install result summary."""
 
-    print()
     print(f"\n  \U0001f389 KDictate {__version__} installed successfully!")
-    print()
-    print("  \U0001f4ac Sign out and back in once so KWin picks up the")
-    print("     input-method configuration, then Ctrl+Space to toggle.")
+    print(f"     Ctrl+Space to toggle dictation.")
     print()
 
 
@@ -498,6 +497,7 @@ def run_full_install(ctx: InstallContext) -> int:
     step_done()
 
     step("Downloading Whisper model")
+    print(flush=True)  # newline so tqdm progress gets its own lines
     download_model(ctx)
     step_done(DEFAULT_MODEL_HF_REPO)
 
@@ -538,6 +538,16 @@ def run_full_install(ctx: InstallContext) -> int:
 
     step("Starting KDictate service")
     reload_systemd_user(ctx)
+    step_done()
+
+    step("Activating KDictate input method")
+    run_command(
+        ctx,
+        ["ibus", "engine", DBUS_INTERFACE],
+        as_user=True,
+        quiet=True,
+        check=False,
+    )
     step_done()
 
     print_summary(ctx)
