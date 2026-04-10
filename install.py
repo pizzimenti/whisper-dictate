@@ -290,6 +290,7 @@ def download_model(ctx: InstallContext) -> None:
         ctx,
         [
             ctx.python_bin,
+            "-u",
             "-c",
             (
                 "from huggingface_hub import snapshot_download; "
@@ -297,6 +298,7 @@ def download_model(ctx: InstallContext) -> None:
                 f"local_dir={str(model_dir)!r})"
             ),
         ],
+        env={"TERM": os.environ.get("TERM", "xterm")},
         as_user=True,
     )
     _chown_home_path(ctx, model_dir)
