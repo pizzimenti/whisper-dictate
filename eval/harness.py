@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Shared evaluation harness for local model bakeoffs."""
+
+from __future__ import annotations
 
 import argparse
 import csv

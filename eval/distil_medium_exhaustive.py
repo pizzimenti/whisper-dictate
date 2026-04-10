@@ -23,13 +23,13 @@ import re
 import statistics
 import sys
 import time
-import unicodedata
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from eval.harness import normalize_text, percentile
 from kdictate.runtime_profile import (
     recommended_cpu_threads,
     recommended_shortform_cpu_threads,
@@ -72,14 +72,6 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def normalize_text(text: str) -> str:
-    text = unicodedata.normalize("NFKC", text).lower()
-    text = re.sub(r"(?<=\w)-(?=\w)", "", text)
-    text = text.replace("'", "")
-    text = re.sub(r"[^a-z0-9]+", " ", text)
-    return " ".join(text.split())
-
-
 def word_error_rate(reference: str, hypothesis: str) -> float:
     ref_tokens = normalize_text(reference).split()
     hyp_tokens = normalize_text(hypothesis).split()
@@ -100,19 +92,6 @@ def word_error_rate(reference: str, hypothesis: str) -> float:
             )
         previous = current
     return previous[-1] / len(ref_tokens)
-
-
-def percentile(values: list[float], pct: float) -> float:
-    if not values:
-        return 0.0
-    ordered = sorted(values)
-    if len(ordered) == 1:
-        return ordered[0]
-    position = pct * (len(ordered) - 1)
-    lower = int(position)
-    upper = min(lower + 1, len(ordered) - 1)
-    fraction = position - lower
-    return ordered[lower] + (ordered[upper] - ordered[lower]) * fraction
 
 
 def format_bool(value: bool) -> str:

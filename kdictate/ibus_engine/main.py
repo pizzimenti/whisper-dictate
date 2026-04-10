@@ -16,12 +16,12 @@ from kdictate.logging_utils import configure_logging
 from kdictate.ibus_engine.engine import ENGINE_NAME, initialize_engine_runtime, load_ibus_module
 
 
-def _startup_engine_runtime(executable_path: str) -> tuple[Any, Any, Any]:
+def _startup_engine_runtime() -> tuple[Any, Any, Any]:
     """Load IBus and initialize the engine runtime objects."""
 
     ibus = load_ibus_module()
     ibus.init()
-    bus, factory = initialize_engine_runtime(executable_path, ibus_module=ibus)
+    bus, factory = initialize_engine_runtime(ibus_module=ibus)
     return ibus, bus, factory
 
 
@@ -31,9 +31,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     logger = configure_logging("kdictate.ibus")
     logger.info("Starting IBus engine process for %s", ENGINE_NAME)
 
-    executable_path = argv[0] if argv else sys.argv[0]
     try:
-        ibus, bus, factory = _startup_engine_runtime(executable_path)
+        ibus, bus, factory = _startup_engine_runtime()
     except IbusEngineError as exc:
         logger.error("IBus engine startup failed: %s", exc)
         print(str(exc), file=sys.stderr)

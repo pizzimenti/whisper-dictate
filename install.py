@@ -10,7 +10,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, Sequence
+from typing import Mapping, NoReturn, Sequence
 
 from kdictate import __version__
 from kdictate.constants import APP_ROOT_ID, DBUS_INTERFACE
@@ -77,7 +77,7 @@ def log(message: str) -> None:
     print(f"==> {message}")
 
 
-def die(message: str) -> "NoReturn":
+def die(message: str) -> NoReturn:
     """Exit with a consistent installer error message."""
 
     print(f"error: {message}", file=sys.stderr)
@@ -162,10 +162,13 @@ def _chown_home_path(ctx: InstallContext, path: Path) -> None:
 
     if os.geteuid() != 0 or not path.exists():
         return
-    current = path
-    while current.is_relative_to(ctx.home):
-        os.chown(current, ctx.install_uid, ctx.install_gid)
-        if current == ctx.home:
+    current = path.resolve()
+    resolved_home = ctx.home.resolve()
+    if not current.is_relative_to(resolved_home):
+        return
+    while current.is_relative_to(resolved_home):
+        os.lchown(current, ctx.install_uid, ctx.install_gid)
+        if current == resolved_home:
             break
         current = current.parent
 
@@ -293,7 +296,10 @@ def configure_preload_engines(ctx: InstallContext) -> None:
         capture_output=True,
         check=False,
     )
-    current_preload = result.stdout.strip() if result.returncode == 0 else ""
+    if result.returncode != 0:
+        log("  dconf read failed; skipping preload-engines update")
+        return
+    current_preload = result.stdout.strip()
     new_preload = next_preload_engines(current_preload, DBUS_INTERFACE)
     if new_preload is None:
         log("  already present; leaving preload-engines unchanged")
@@ -413,6 +419,9 @@ def run_full_install(ctx: InstallContext) -> int:
     require_command("pacman")
     require_command("python3")
     require_command("systemctl")
+    # gdbus is invoked at runtime by the toggle .desktop shortcut, not by the
+    # installer. Check it here so a missing gdbus is surfaced at install time
+    # rather than silently failing on first Ctrl+Space toggle.
     require_command("gdbus")
     require_command("rsync")
     require_command("dconf")

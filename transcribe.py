@@ -8,6 +8,7 @@ benchmarking, debugging decode settings, and producing optional JSON output.
 
 import argparse
 import json
+import time
 from pathlib import Path
 
 from kdictate.offline_common import (

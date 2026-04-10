@@ -198,12 +198,10 @@ def claim_component_name(bus: Any, ibus_module: ModuleType | None = None) -> int
 
 
 def initialize_engine_runtime(
-    executable_path: str,
     ibus_module: ModuleType | None = None,
 ) -> tuple[Any, Any]:
     """Connect to IBus and export the factory for the installed engine path."""
 
-    del executable_path
     ibus = ibus_module or load_ibus_module()
     bus = ibus.Bus.new()
     if not bus.is_connected():

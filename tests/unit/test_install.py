@@ -13,9 +13,21 @@ class InstallHelperTests(unittest.TestCase):
         current = f"['xkb:de::ger', '{DBUS_INTERFACE}']"
         self.assertIsNone(install.next_preload_engines(current, DBUS_INTERFACE))
 
-    def test_next_preload_engines_adds_only_kdictate_for_empty_values(self) -> None:
+    def test_next_preload_engines_adds_only_kdictate_for_typed_empty(self) -> None:
         self.assertEqual(
             install.next_preload_engines("@as []", DBUS_INTERFACE),
+            f"['{DBUS_INTERFACE}']",
+        )
+
+    def test_next_preload_engines_adds_only_kdictate_for_bare_empty(self) -> None:
+        self.assertEqual(
+            install.next_preload_engines("[]", DBUS_INTERFACE),
+            f"['{DBUS_INTERFACE}']",
+        )
+
+    def test_next_preload_engines_adds_only_kdictate_for_empty_string(self) -> None:
+        self.assertEqual(
+            install.next_preload_engines("", DBUS_INTERFACE),
             f"['{DBUS_INTERFACE}']",
         )
 

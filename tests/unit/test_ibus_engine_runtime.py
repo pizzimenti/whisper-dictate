@@ -62,7 +62,6 @@ class IbusEngineRuntimeTests(unittest.TestCase):
         fake_ibus = self._make_ibus_module(fake_bus)
 
         bus, factory = engine.initialize_engine_runtime(
-            "/tmp/ibus-engine-kdictate",
             ibus_module=fake_ibus,
         )
 
@@ -76,7 +75,7 @@ class IbusEngineRuntimeTests(unittest.TestCase):
         fake_ibus = self._make_ibus_module(fake_bus)
 
         with self.assertRaisesRegex(IbusEngineError, "connect to the IBus bus"):
-            engine.initialize_engine_runtime("/tmp/ibus-engine-kdictate", ibus_module=fake_ibus)
+            engine.initialize_engine_runtime(ibus_module=fake_ibus)
 
         self.assertEqual(fake_bus.requested_names, [])
 
@@ -85,4 +84,4 @@ class IbusEngineRuntimeTests(unittest.TestCase):
         fake_ibus = self._make_ibus_module(fake_bus)
 
         with self.assertRaisesRegex(IbusEngineError, "claim IBus component name"):
-            engine.initialize_engine_runtime("/tmp/ibus-engine-kdictate", ibus_module=fake_ibus)
+            engine.initialize_engine_runtime(ibus_module=fake_ibus)
