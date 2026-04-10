@@ -102,7 +102,7 @@ def build_context() -> InstallContext:
         home = Path(user_entry.pw_dir)
         install_gid = user_entry.pw_gid
     elif os.geteuid() == 0:
-        die("Do not run the installer as root directly; use pkexec or let install.sh handle elevation")
+        die("Do not run the installer as root directly; use pkexec")
     else:
         install_uid = os.getuid()
         install_gid = os.getgid()
@@ -443,7 +443,7 @@ def run_full_install(ctx: InstallContext) -> int:
     log("Installing systemd user service")
     install_rendered_file(
         ctx,
-        ctx.script_dir / "systemd" / SERVICE_NAME,
+        ctx.script_dir / "packaging" / "kdictate-systemd.service",
         ctx.home / ".config/systemd/user" / SERVICE_NAME,
     )
 

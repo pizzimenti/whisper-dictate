@@ -57,8 +57,6 @@ Plasma's KWin Wayland input method in `~/.config/kwinrc` to use the installed
 `IBus Wayland` desktop file, refreshes the IBus cache, and restarts
 `ibus-daemon` for the current session.
 
-The legacy `install.sh` wrapper still exists and simply forwards to `install.py`.
-
 To start the daemon manually instead:
 
 ```bash
@@ -157,18 +155,17 @@ behavior stays consistent across shells and user services.
 ## Files
 
 - `install.py`: install dependencies, register the user service, and install the D-Bus and IBus metadata (Arch/Manjaro).
-- `install.sh`: thin compatibility wrapper that forwards to `install.py`.
 - `pyproject.toml`: package metadata and console-script entry points.
 - `requirements-dev.txt`: local development and test-only dependencies.
 - `kdictate/`: core package — D-Bus contract, daemon logic, IBus frontend, CLI, runtime utilities, audio helpers (`kdictate.audio_common`), and CPU thread / compute-type selection (`kdictate.runtime_profile`).
-- `systemd/io.github.pizzimenti.KDictate.service`: systemd user unit for the core daemon (`ExecStart=... kdictate-daemon --profile service`).
+- `packaging/kdictate-systemd.service`: systemd user unit for the core daemon (`ExecStart=... kdictate-daemon --profile service`).
 - `packaging/io.github.pizzimenti.KDictate.service`: D-Bus session activation file (delegates to the systemd unit via `SystemdService=`).
 - `packaging/io.github.pizzimenti.KDictate.xml`: D-Bus introspection XML published on the session bus.
 - `packaging/io.github.pizzimenti.KDictate.component.xml`: IBus component metadata for the engine frontend.
 - `packaging/io.github.pizzimenti.KDictateToggle.desktop`: hidden KDE application entry that binds `Ctrl+Space` to a direct `gdbus call` against the session bus.
 - `packaging/60-kdictate-ibus.conf`: `environment.d` snippet that adds the per-user IBus component directory to `IBUS_COMPONENT_PATH` and sets `XMODIFIERS=@im=ibus`.
 - `packaging/kdictate-plasma-wayland.sh`: Plasma session env script that unsets `GTK_IM_MODULE` and `QT_IM_MODULE` to let the compositor-backed IBus Wayland path handle native clients.
-- `scripts/check_ibus_only.py`: regression check for forbidden injector and clipboard backends.
+- `check_ibus_only.py`: regression check for forbidden injector and clipboard backends.
 
 ## Notes
 

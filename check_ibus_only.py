@@ -10,14 +10,13 @@ FORBIDDEN_TOKENS = ("ydotool", "dotool", "wtype", "wl-copy", "xdotool", "type_te
 ACTIVE_PATHS = (
     Path("README.md"),
     Path("install.py"),
-    Path("install.sh"),
+    Path("install.py"),
     Path("kdictate"),
-    Path("systemd"),
     Path("packaging"),
 )
 REQUIRED_FILES = (
     Path("packaging/kdictate-plasma-wayland.sh"),
-    Path("systemd/io.github.pizzimenti.KDictate.service"),
+    Path("packaging/kdictate-systemd.service"),
     Path("packaging/io.github.pizzimenti.KDictate.service"),
     Path("packaging/io.github.pizzimenti.KDictate.component.xml"),
 )

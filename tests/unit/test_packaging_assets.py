@@ -48,7 +48,7 @@ class PackagingAssetTests(unittest.TestCase):
 
     def test_dbus_and_systemd_service_files_reference_the_frozen_identity(self) -> None:
         dbus_service_path = Path("packaging/io.github.pizzimenti.KDictate.service")
-        systemd_service_path = Path("systemd/io.github.pizzimenti.KDictate.service")
+        systemd_service_path = Path("packaging/kdictate-systemd.service")
         toggle_desktop_path = Path("packaging/io.github.pizzimenti.KDictateToggle.desktop")
         env_template_path = Path("packaging/60-kdictate-ibus.conf")
         plasma_env_script_path = Path("packaging/kdictate-plasma-wayland.sh")
@@ -83,16 +83,11 @@ class PackagingAssetTests(unittest.TestCase):
         self.assertIn("unset GTK_IM_MODULE", plasma_env_script)
         self.assertIn("unset QT_IM_MODULE", plasma_env_script)
 
-    def test_regression_check_wrapper_and_python_impl_exist(self) -> None:
-        wrapper_path = Path("scripts/check-ibus-only.sh")
-        script_path = Path("scripts/check_ibus_only.py")
-        self.assertTrue(wrapper_path.exists())
+    def test_regression_check_script_exists(self) -> None:
+        script_path = Path("check_ibus_only.py")
         self.assertTrue(script_path.exists())
-        wrapper = wrapper_path.read_text(encoding="utf-8")
         script = script_path.read_text(encoding="utf-8")
 
-        self.assertTrue(wrapper.startswith("#!/usr/bin/env bash"))
-        self.assertIn("check_ibus_only.py", wrapper)
         self.assertTrue(script.startswith("#!/usr/bin/env python3"))
         self.assertIn("install.py", script)
         self.assertIn("systemd", script)
@@ -105,12 +100,9 @@ class PackagingAssetTests(unittest.TestCase):
         self.assertIn("xdotool", script)
         self.assertIn("type_text", script)
 
-    def test_install_entrypoints_reference_python_installer(self) -> None:
-        install_wrapper = Path("install.sh").read_text(encoding="utf-8")
+    def test_install_script_has_expected_contents(self) -> None:
         install_script = Path("install.py").read_text(encoding="utf-8")
 
-        self.assertTrue(install_wrapper.startswith("#!/usr/bin/env bash"))
-        self.assertIn("install.py", install_wrapper)
         self.assertIn("next_preload_engines", install_script)
         self.assertIn("--delete-excluded", install_script)
         self.assertIn('KDE_VIRTUAL_KEYBOARD_DESKTOP = Path(', install_script)
