@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Mapping, NoReturn, Sequence
 
 from kdictate import __version__
+from kdictate.app_metadata import DEFAULT_MODEL_HF_REPO, DEFAULT_MODEL_NAME
 from kdictate.constants import APP_ROOT_ID, DBUS_INTERFACE
 
 SERVICE_NAME = f"{APP_ROOT_ID}.service"
@@ -276,6 +277,43 @@ def install_python_environment(ctx: InstallContext) -> None:
     run_command(ctx, [ctx.pip_bin, "install", "--no-deps", "-e", ctx.runtime_dir], as_user=True)
 
 
+def download_model(ctx: InstallContext) -> None:
+    """Download or verify the Whisper model.
+
+    Always calls snapshot_download, which checks file hashes internally
+    and only re-downloads incomplete or missing files. This handles both
+    fresh installs and interrupted downloads correctly.
+    """
+
+    model_dir = ctx.runtime_dir / DEFAULT_MODEL_NAME
+    log(f"Ensuring model {DEFAULT_MODEL_HF_REPO} is complete at {model_dir}")
+
+    # Run the download outside run_command so the TTY is preserved for
+    # tqdm progress bars. subprocess user=/group= drops privileges
+    # cleanly without the sudo wrapper that kills the PTY.
+    dl_env = os.environ.copy()
+    dl_env["HOME"] = str(ctx.home)
+    dl_env["XDG_RUNTIME_DIR"] = str(ctx.user_runtime_dir)
+    subprocess.run(
+        [
+            str(ctx.python_bin),
+            "-u",
+            "-c",
+            (
+                "from huggingface_hub import snapshot_download; "
+                f"snapshot_download(repo_id={DEFAULT_MODEL_HF_REPO!r}, "
+                f"local_dir={str(model_dir)!r})"
+            ),
+        ],
+        check=True,
+        env=dl_env,
+        user=ctx.install_uid if os.geteuid() == 0 else None,
+        group=ctx.install_gid if os.geteuid() == 0 else None,
+    )
+    _chown_home_path(ctx, model_dir)
+    log("Model download complete")
+
+
 def next_preload_engines(current_preload: str, engine_id: str) -> str | None:
     """Return the updated preload list or ``None`` when no change is needed."""
 
@@ -446,8 +484,8 @@ def run_full_install(ctx: InstallContext) -> int:
     require_command("ibus-daemon")
 
     sync_runtime(ctx)
-    # Model is expected at $RUNTIME_DIR/whisper-large-v3-turbo-ct2/.
     install_python_environment(ctx)
+    download_model(ctx)
 
     log("Installing systemd user service")
     install_rendered_file(
