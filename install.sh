@@ -72,7 +72,7 @@ install_copied_file() {
 sync_runtime() {
     run_as_user mkdir -p "$RUNTIME_DIR"
     log "Syncing source files to $RUNTIME_DIR"
-    run_as_user rsync -a --delete \
+    run_as_user rsync -a --delete --exclude='__pycache__' \
         "$SCRIPT_DIR/kdictate/" "$RUNTIME_DIR/kdictate/"
     run_as_user install -Dm644 "$SCRIPT_DIR/requirements.txt" "$RUNTIME_DIR/requirements.txt"
     run_as_user install -Dm644 "$SCRIPT_DIR/pyproject.toml"   "$RUNTIME_DIR/pyproject.toml"
