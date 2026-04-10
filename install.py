@@ -425,16 +425,24 @@ def refresh_ibus_registry(ctx: InstallContext) -> None:
         )
     }
     run_command(ctx, ["ibus", "write-cache"], as_user=True, env=ibus_env, quiet=True)
-    # Restart ibus-daemon so it picks up the new component from the cache.
-    # Use `ibus restart` which replaces the running daemon in-place,
-    # preserving the Wayland panel integration that KWin set up at login.
-    # If no daemon is running (first install before login), start one.
-    result = run_command(
-        ctx, ["ibus", "restart"], as_user=True, env=ibus_env, quiet=True, check=False,
-    )
-    if result.returncode != 0:
-        run_command(ctx, ["bash", "-c", "ibus-daemon -drx >/dev/null 2>&1"],
-                    as_user=True, env=ibus_env, check=False)
+    # Toggle KWin's virtual keyboard off/on via D-Bus. This causes KWin to
+    # relaunch ibus-ui-gtk3 --enable-wayland-im (which in turn starts
+    # ibus-daemon), picking up the updated cache with our component.
+    # This avoids the need to sign out and back in.
+    if shutil.which("gdbus") is not None:
+        vk_dest = "org.kde.KWin"
+        vk_path = "/VirtualKeyboard"
+        vk_iface = "org.kde.kwin.VirtualKeyboard"
+        set_method = "org.freedesktop.DBus.Properties.Set"
+        for value in ("false", "true"):
+            run_command(
+                ctx,
+                ["gdbus", "call", "--session",
+                 "--dest", vk_dest, "--object-path", vk_path,
+                 "--method", set_method, vk_iface, "enabled",
+                 f"<boolean {value}>"],
+                as_user=True, quiet=True, check=False,
+            )
 
 
 def reload_systemd_user(ctx: InstallContext) -> None:
@@ -449,10 +457,7 @@ def print_summary(ctx: InstallContext) -> None:
     """Print the install result summary."""
 
     print(f"\n  \U0001f389 KDictate {__version__} installed successfully!")
-    print()
-    print("  \U0001f4ac On first install, sign out and back in so KWin")
-    print("     picks up the IBus Wayland input method.")
-    print("     Then use Ctrl+Space to toggle dictation.")
+    print("     Ctrl+Space to toggle dictation.")
     print()
 
 
