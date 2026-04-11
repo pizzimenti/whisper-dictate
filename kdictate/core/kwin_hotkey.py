@@ -73,7 +73,31 @@ MONITOR_BUS_NAME = "org.freedesktop.a11y.Manager"
 MONITOR_OBJECT_PATH = "/org/freedesktop/a11y/Manager"
 MONITOR_INTERFACE = "org.freedesktop.a11y.KeyboardMonitor"
 
+# D-Bus RequestName request flags (from dbus spec §7.2.1):
+#   ALLOW_REPLACEMENT = 0x1 — another peer can steal our name if they
+#                             later RequestName it with REPLACE_EXISTING.
+#   REPLACE_EXISTING  = 0x2 — if the name is currently owned AND its
+#                             owner set ALLOW_REPLACEMENT, take it from
+#                             them. Otherwise fail with NAME_EXISTS.
+#   DO_NOT_QUEUE      = 0x4 — if the name is currently owned, fail
+#                             immediately with NAME_EXISTS instead of
+#                             queuing us behind the current owner.
+#
+# We pass DO_NOT_QUEUE so a failed RequestName is guaranteed to leave
+# us with zero bus-name state. Without this flag, flags=0 would let
+# dbus queue us behind Orca; _request_client_name would then raise
+# (because reply != PRIMARY_OWNER/ALREADY_OWNER), _owns_name would
+# stay False, and stop() would not call ReleaseName — so our queued
+# claim would survive the failed startup, and when Orca later exits
+# we would silently become the screen-reader name owner for the rest
+# of the daemon lifetime. Codex flagged this on PR #6.
+_DBUS_NAME_FLAG_DO_NOT_QUEUE = 0x4
+
+# D-Bus RequestName reply codes (from dbus spec §7.2.1).
 _DBUS_REQUEST_NAME_PRIMARY_OWNER = 1
+# IN_QUEUE = 2 is intentionally absent: DO_NOT_QUEUE above guarantees
+# we never get queued, so IN_QUEUE cannot be returned.
+# EXISTS   = 3 is the failure path — name is owned and we refused to queue.
 _DBUS_REQUEST_NAME_ALREADY_OWNER = 4
 
 
@@ -131,7 +155,7 @@ class KwinHotkeyListener:
         self._keysym = keysym
         self._required_modifier_mask = required_modifier_mask
         self._ignored_modifier_mask = ignored_modifier_mask
-        self._logger = logger or configure_logging("kdictate.hotkey")
+        self._logger = logger or configure_logging("kdictate.daemon.hotkey")
         self._connection = connection
         self._clock = clock
         self._owns_name = False
@@ -210,16 +234,11 @@ class KwinHotkeyListener:
     # -- internals ----------------------------------------------------------
 
     def _request_client_name(self, Gio: Any, GLib: Any) -> None:
-        # flags=0 means we do NOT pass DBUS_NAME_FLAG_ALLOW_REPLACEMENT,
-        # DBUS_NAME_FLAG_REPLACE_EXISTING, or DBUS_NAME_FLAG_DO_NOT_QUEUE.
-        # That third one is the key: without DO_NOT_QUEUE *cleared*, we
-        # would be queued behind any existing owner — but we also are
-        # not telling dbus to queue us, so the daemon resolves the call
-        # synchronously and returns either PRIMARY_OWNER (1) or
-        # NAME_EXISTS (3). DBUS_REQUEST_NAME_REPLY_IN_QUEUE (2) is
-        # only reachable when the caller passes ALLOW_REPLACEMENT
-        # without DO_NOT_QUEUE, which we never do — so it is
-        # intentionally absent from the success set below.
+        # DO_NOT_QUEUE is essential — see the flag constant above for
+        # the full rationale. Without it, flags=0 (or any flags without
+        # 0x4 set) would cause dbus to queue us behind any existing
+        # owner of CLIENT_NAME, and our failed-startup cleanup path
+        # could not withdraw that queue entry cleanly.
         reply = self._call(
             Gio,
             GLib,
@@ -227,7 +246,7 @@ class KwinHotkeyListener:
             "/org/freedesktop/DBus",
             "org.freedesktop.DBus",
             "RequestName",
-            GLib.Variant("(su)", (CLIENT_NAME, 0)),
+            GLib.Variant("(su)", (CLIENT_NAME, _DBUS_NAME_FLAG_DO_NOT_QUEUE)),
         )
         result_code = reply[0] if reply else None
         if result_code not in (

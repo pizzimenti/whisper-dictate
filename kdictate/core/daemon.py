@@ -115,7 +115,7 @@ class DictationDaemon:
         self.model = model
         self.runtime_paths = runtime_paths
         self._event_sink = event_sink or _NullEventSink()
-        self._logger = logger or configure_logging("kdictate.core")
+        self._logger = logger or configure_logging("kdictate.daemon.core")
         self._stream_factory = stream_factory
         self._input_device_resolver = input_device_resolver
         self._transcription_fn = transcription_fn
@@ -862,7 +862,15 @@ def main(argv: list[str] | None = None) -> int:
     # FileHandler instances to the same path (one per subsystem) races
     # and produces interleaved/garbled output. Funnel everything through
     # one handler instead.
-    base_logger = configure_logging("kdictate", log_file="daemon.log")
+    #
+    # Base logger name is "kdictate.daemon" rather than "kdictate" so
+    # sibling subtrees like "kdictate.ibus" (IBus engine, separate
+    # process) and "kdictate.tests" (unit test loggers) do not share
+    # this FileHandler via the root-level "kdictate" ancestor. Codex
+    # flagged on PR #6 that the broader name made daemon.log the sink
+    # for the entire kdictate.* hierarchy, which is how the test-leak
+    # bug fixed in b1cc382 was able to happen in the first place.
+    base_logger = configure_logging("kdictate.daemon", log_file="daemon.log")
     logger = get_propagating_child(base_logger, "core")
     try:
         config, model, runtime = _load_model_and_config(argv)

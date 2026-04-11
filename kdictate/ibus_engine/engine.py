@@ -124,8 +124,16 @@ def create_ibus_engine_class(ibus_module: ModuleType | None = None) -> type[Any]
             try:
                 super().do_destroy()
             except Exception:  # noqa: BLE001
-                # Some IBus builds do not expose a parent do_destroy implementation.
-                pass
+                # Some IBus builds do not expose a parent do_destroy
+                # implementation, and swallowing the raise keeps tear-
+                # down moving. Log at debug level so the cause is
+                # recoverable from the journal if the swallowed call
+                # was actually a real bug, without spamming WARNING on
+                # every destroy.
+                self._logger.debug(
+                    "super().do_destroy() raised during tear-down",
+                    exc_info=True,
+                )
 
     KDictateEngine.__name__ = "KDictateEngine"
     KDictateEngine.__qualname__ = "KDictateEngine"

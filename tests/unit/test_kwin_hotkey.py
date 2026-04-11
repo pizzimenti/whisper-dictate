@@ -164,6 +164,28 @@ class KwinHotkeyListenerStartTest(unittest.TestCase):
         self.assertEqual(sub["interface"], "org.freedesktop.a11y.KeyboardMonitor")
         self.assertEqual(sub["signal"], "KeyEvent")
 
+    def test_request_name_passes_do_not_queue_flag(self) -> None:
+        # Regression test for the codex P1 finding on PR #6 commit
+        # 8aa02fe. The listener MUST pass DBUS_NAME_FLAG_DO_NOT_QUEUE
+        # (0x4) to RequestName so that a failed claim (Orca already
+        # owning the name) returns NAME_EXISTS immediately instead of
+        # queuing us behind the current owner. Without this flag, a
+        # failed startup leaves a queued claim that silently becomes
+        # owner when Orca later exits.
+        self.listener.start()
+
+        request_name_calls = [
+            c for c in self.connection.calls if c["method"] == "RequestName"
+        ]
+        self.assertEqual(len(request_name_calls), 1)
+        _signature, _sig_type, payload = request_name_calls[0]["parameters"]
+        name, flags = payload
+        self.assertEqual(name, "org.gnome.Orca.KeyboardMonitor")
+        self.assertTrue(
+            flags & 0x4,
+            f"RequestName flags=0x{flags:x} missing DO_NOT_QUEUE (0x4)",
+        )
+
     def test_request_name_failure_raises(self) -> None:
         self.connection = _FakeConnection(request_name_reply=3)  # 3 = EXISTS
         self.listener = KwinHotkeyListener(

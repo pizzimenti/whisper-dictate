@@ -146,6 +146,16 @@ class FileHandlerAttachmentTests(unittest.TestCase):
         return logger
 
     def test_configure_logging_with_log_file_attaches_filehandler(self) -> None:
+        # Reset any stale handlers carried over from a prior test run
+        # in the same process so the post-condition is unambiguous —
+        # "this logger has exactly one FileHandler" must be a
+        # statement about THIS call, not a happy coincidence with
+        # whatever prior state existed.
+        stale = logging.getLogger("kdictate.tests.fh_attach")
+        for handler in list(stale.handlers):
+            stale.removeHandler(handler)
+        self._track(stale)
+
         logger = self._track(
             configure_logging(
                 "kdictate.tests.fh_attach",

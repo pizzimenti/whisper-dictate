@@ -40,6 +40,11 @@ class IbusRenderAdapter:
         self._frame: int = 0
         self._mode: str = "idle"  # "idle" | "listening" | "transcribing"
         self._partial: str = ""
+        # Track whether an IBus preedit is currently on-screen so
+        # _clear_preedit can skip the IBus hide round-trip when nothing
+        # is visible and so shutdown() knows whether it needs to call
+        # the hide API or can just drop state.
+        self._visible: bool = False
 
     def set_preedit(self, presentation: PreeditPresentation | None) -> None:
         """Render a preedit presentation, or hide preedit when ``None``."""
@@ -59,10 +64,23 @@ class IbusRenderAdapter:
         self._engine.commit_text(self._ibus.Text.new_from_string(text))
 
     def shutdown(self) -> None:
-        """Stop any running animation timer.  Safe to call repeatedly."""
-        self._stop_timer()
-        self._mode = "idle"
-        self._partial = ""
+        """Tear down the adapter: stop the spinner timer and make sure
+        no stale preedit is left on-screen.
+
+        Safe to call repeatedly, and safe to call from IBus tear-down
+        paths where the engine may be part-way through destruction —
+        the IBus hide round-trip is wrapped so any raise from the
+        bound methods is swallowed (the adapter state is still reset
+        regardless).
+        """
+        try:
+            self._clear_preedit()
+        except Exception:  # noqa: BLE001
+            # IBus may already be tearing the engine down.
+            self._stop_timer()
+            self._visible = False
+            self._mode = "idle"
+            self._partial = ""
 
     # -- Internal -----------------------------------------------------------
 
@@ -75,11 +93,17 @@ class IbusRenderAdapter:
         self._stop_timer()
         self._mode = "idle"
         self._partial = ""
+        if not self._visible:
+            # Nothing on-screen — skip the round-trip to IBus. Prevents
+            # spurious hide_preedit_text calls on focus-out while the
+            # preedit was never shown in the first place.
+            return
         self._engine.update_preedit_text_with_mode(
             self._ibus.Text.new_from_string(""), 0, False,
             self._ibus.PreeditFocusMode.CLEAR,
         )
         self._engine.hide_preedit_text()
+        self._visible = False
 
     def _tick(self) -> bool:
         self._frame = (self._frame + 1) % len(_SPINNER_FRAMES)
@@ -107,3 +131,4 @@ class IbusRenderAdapter:
             ibus_text, len(frame), True, self._ibus.PreeditFocusMode.CLEAR,
         )
         self._engine.show_preedit_text()
+        self._visible = True

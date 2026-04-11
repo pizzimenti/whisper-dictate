@@ -31,7 +31,7 @@ class SessionDbusService:
         self._bus_name = bus_name
         self._object_path = object_path
         self._interface_name = interface_name
-        self._logger = logger or configure_logging("kdictate.dbus")
+        self._logger = logger or configure_logging("kdictate.daemon.dbus")
         self._signal_sender = signal_sender or self._default_signal_sender
         self._connection = None
         self._node_info = None

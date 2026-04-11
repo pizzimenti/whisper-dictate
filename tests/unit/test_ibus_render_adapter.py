@@ -218,6 +218,60 @@ class IbusRenderAdapterTest(unittest.TestCase):
         self.adapter.shutdown()
         self.assertEqual(self.glib.cancelled, [])
 
+    def test_shutdown_clears_visible_preedit_from_screen(self) -> None:
+        # Regression test for the CodeRabbit finding on PR #6. Before
+        # the fix, shutdown() only stopped the spinner timer and reset
+        # state — if a preedit was on-screen when IBus tore the engine
+        # down, the text would stay visible until something else
+        # triggered a hide. shutdown() must call the IBus hide API so
+        # the user's window is clean.
+        self.adapter.set_preedit(PreeditPresentation("hello", "listening"))
+        self.engine.hidden = 0
+
+        self.adapter.shutdown()
+
+        # After shutdown, the engine must have received at least one
+        # hide_preedit_text() call, and the adapter must have dropped
+        # the visible flag.
+        self.assertGreaterEqual(self.engine.hidden, 1)
+        self.assertFalse(self.adapter._visible)
+
+    def test_shutdown_tolerates_engine_raising_during_tear_down(self) -> None:
+        # If IBus is part-way through destroying the engine, the
+        # update_preedit_text_with_mode / hide_preedit_text calls may
+        # raise. shutdown() must not propagate the exception — the
+        # daemon's main() finally block calls it, and a raise there
+        # would mask the real shutdown reason.
+        self.adapter.set_preedit(PreeditPresentation("hello", "listening"))
+
+        def boom(*args: Any, **kwargs: Any) -> None:
+            raise RuntimeError("engine is being torn down")
+
+        self.engine.update_preedit_text_with_mode = boom  # type: ignore[assignment]
+
+        # Should not raise:
+        self.adapter.shutdown()
+
+        # State should still have been reset even though the IBus
+        # round-trip failed.
+        self.assertIsNone(self.adapter._timer_id)
+        self.assertFalse(self.adapter._visible)
+        self.assertEqual(self.adapter._mode, "idle")
+        self.assertEqual(self.adapter._partial, "")
+
+    # -- set_preedit(None) skips IBus when nothing is visible --------------
+
+    def test_set_preedit_none_is_noop_when_never_rendered(self) -> None:
+        # _clear_preedit skips the IBus hide round-trip when nothing
+        # is visible — avoids noise on focus-out when the preedit was
+        # never shown.
+        self.engine.hidden = 0
+
+        self.adapter.set_preedit(None)
+
+        self.assertEqual(self.engine.hidden, 0)
+        self.assertEqual(self.engine.preedit_calls, [])
+
 
 if __name__ == "__main__":
     unittest.main()

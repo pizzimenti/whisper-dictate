@@ -202,7 +202,13 @@ PY
         if [[ $rc -ne 0 ]]; then
             fail "previous_preload_engines could not parse dconf value: $current"
         elif [[ -z "$new_value" ]]; then
-            ok "kdictate not present in preload-engines (no change needed)"
+            # Bash glob above confirmed "$current" *contains* $ENGINE_NAME,
+            # but previous_preload_engines's exact-token match returned
+            # None. That means the engine appears as a substring of some
+            # other entry in the list (or matches in some unexpected way).
+            # Not catastrophic, but worth surfacing as a warning rather
+            # than claiming everything is fine.
+            warn "$ENGINE_NAME appears in preload-engines as a substring of another entry, not a whole token; leaving dconf untouched"
         elif [[ "$new_value" == "@as []" ]]; then
             dconf reset /desktop/ibus/general/preload-engines
         else
