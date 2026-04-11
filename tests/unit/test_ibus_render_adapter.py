@@ -170,18 +170,31 @@ class IbusRenderAdapterTest(unittest.TestCase):
         self.assertIn("Transcribing", text)
 
     def test_mode_change_resets_frame_index(self) -> None:
+        # Record what frame 0 looks like for the target mode.
+        self.adapter.set_preedit(PreeditPresentation("", "transcribing"))
+        frame_zero_transcribing = self.engine.preedit_calls[-1][0]
+
         self.adapter.set_preedit(PreeditPresentation("", "listening"))
-        # Advance several ticks
-        for _ in range(5):
+        # Advance several ticks so the spinner index is non-zero.
+        for _ in range(3):
             self.glib.fire_last()
 
         self.adapter.set_preedit(PreeditPresentation("", "transcribing"))
 
-        # First render of new mode should use frame 0
-        # (we can't directly assert frame index, but we know it should
-        # produce a deterministic first render)
-        text = self.engine.preedit_calls[-1][0]
-        self.assertIn("Transcribing", text)
+        # First render after mode change must be the deterministic frame-0 output.
+        self.assertEqual(self.engine.preedit_calls[-1][0], frame_zero_transcribing)
+
+    def test_same_mode_set_preserves_frame_index(self) -> None:
+        self.adapter.set_preedit(PreeditPresentation("", "listening"))
+        self.glib.fire_last()
+        after_tick = self.engine.preedit_calls[-1][0]
+
+        # Re-setting the same mode with a new partial should keep spinner frame.
+        self.adapter.set_preedit(PreeditPresentation("hello", "listening"))
+        new_text = self.engine.preedit_calls[-1][0]
+
+        # Spinner char (last char of after_tick) should appear in the new render.
+        self.assertIn(after_tick[-1], new_text)
 
     # -- commit_text --------------------------------------------------------
 

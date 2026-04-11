@@ -78,7 +78,7 @@ def attach_file_handler(logger: logging.Logger, filename: str) -> None:
         if isinstance(handler, logging.FileHandler) and handler.baseFilename == target_str:
             return
     try:
-        file_handler = logging.FileHandler(target, mode="w", encoding="utf-8")
+        file_handler = logging.FileHandler(target, mode="a", encoding="utf-8")
     except OSError:
         return
     file_handler.setFormatter(_formatter())

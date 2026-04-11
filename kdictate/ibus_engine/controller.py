@@ -159,6 +159,8 @@ class DictationEngineController:
         if state == STATE_RECORDING:
             if self._can_render_status():
                 self._show_preedit(self._state.pending_partial, "listening")
+            else:
+                self._hide_preedit(reason="recording-without-focus")
             return
 
     def handle_partial_transcript(self, text: str) -> None:
@@ -179,7 +181,7 @@ class DictationEngineController:
             return
 
         self._logger.info("Updating preedit from partial transcript: %s", normalized)
-        self._show_preedit(normalized, "listening")
+        self._show_preedit(normalized, self._live_mode())
 
     def handle_final_transcript(self, text: str) -> None:
         """Commit a finalized transcript through IBus only."""
@@ -231,8 +233,13 @@ class DictationEngineController:
             self._state.enabled
             and self._state.focused
             and self._state.daemon_available
-            and self._state.daemon_state == STATE_RECORDING
+            and self._state.daemon_state in {STATE_RECORDING, STATE_TRANSCRIBING}
         )
+
+    def _live_mode(self) -> AnimationMode:
+        if self._state.daemon_state == STATE_TRANSCRIBING:
+            return "transcribing"
+        return "listening"
 
     def _can_commit_final(self) -> bool:
         # Intentionally does NOT check daemon_state.  FinalTranscript and
@@ -245,7 +252,7 @@ class DictationEngineController:
     def _sync_preedit(self, *, reason: str) -> None:
         if self._state.pending_partial and self._can_render_live_text():
             self._logger.debug("Restoring preedit after %s", reason)
-            self._show_preedit(self._state.pending_partial, "listening")
+            self._show_preedit(self._state.pending_partial, self._live_mode())
             return
 
         if self._state.pending_partial:

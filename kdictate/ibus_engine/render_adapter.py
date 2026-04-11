@@ -46,6 +46,8 @@ class IbusRenderAdapter:
         if presentation is None:
             self._clear_preedit()
             return
+        if self._mode != presentation.mode:
+            self._frame = 0
         self._partial = presentation.partial
         self._mode = presentation.mode
         self._render()

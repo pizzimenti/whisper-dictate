@@ -178,6 +178,30 @@ class DictationEngineControllerTest(unittest.TestCase):
         self.assertEqual(self.adapter.last_partial, "hello world")
         self.assertEqual(self.adapter.last_mode, "transcribing")
 
+    def test_partial_transcript_during_transcribing_renders_with_transcribing_mode(self) -> None:
+        self._ready_recording()
+        self.controller.handle_state_changed(STATE_TRANSCRIBING)
+        self.adapter.actions.clear()
+
+        self.controller.handle_partial_transcript("hello world")
+
+        self.assertEqual(self.adapter.last_partial, "hello world")
+        self.assertEqual(self.adapter.last_mode, "transcribing")
+        self.assertTrue(self.controller.state.preedit_visible)
+
+    def test_recording_without_focus_hides_preedit(self) -> None:
+        self.controller.set_daemon_available(True)
+        self.controller.enable()
+        self.controller.focus_in()
+        self.controller.handle_partial_transcript("stale")
+        self.controller.focus_out()
+        self.adapter.actions.clear()
+
+        self.controller.handle_state_changed(STATE_RECORDING)
+
+        self.assertFalse(self.adapter.visible)
+        self.assertIn(("hide",), self.adapter.actions)
+
     def test_recording_with_no_partial_shows_listening(self) -> None:
         self.controller.set_daemon_available(True)
         self.controller.enable()
