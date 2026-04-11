@@ -181,15 +181,19 @@ def _ensure_under_home(ctx: InstallContext, destination: Path) -> None:
     """Refuse to install to paths outside the invoking user's HOME.
 
     Originally a privilege-escalation mitigation when the installer ran
-    as root; now purely a typo guard. If a caller accidentally constructs
-    a destination like ``/etc/kdictate/foo`` instead of ``~/.config/
-    kdictate/foo``, we fail fast with a clear message instead of letting
-    the write succeed in some unexpected place.
+    as root; now a typo guard plus a defensive check against stale
+    symlinks at the destination. Resolving *destination* itself (not
+    just ``destination.parent``) matters because a prior install or a
+    user-planted symlink at the target filename could point outside
+    HOME, and writing through that symlink would land the file where
+    the symlink points, not where we intended. ``strict=False`` so
+    non-existent paths (the common case on a fresh install) are still
+    canonicalized based on whatever components DO exist.
     """
 
-    resolved_parent = destination.parent.resolve()
-    if not resolved_parent.is_relative_to(ctx.home.resolve()):
-        die(f"Refusing to write outside home tree: {destination} resolves to {resolved_parent}")
+    resolved = destination.resolve(strict=False)
+    if not resolved.is_relative_to(ctx.home.resolve()):
+        die(f"Refusing to write outside home tree: {destination} resolves to {resolved}")
 
 
 def write_home_file(ctx: InstallContext, destination: Path, text: str, *, mode: int = 0o644) -> None:
@@ -516,7 +520,11 @@ def run_full_install(ctx: InstallContext) -> int:
     print(f"\n  KDictate {__version__} installer\n")
 
     preflight_ibus()
-    for cmd in ("python3", "systemctl", "gdbus", "rsync", "dconf"):
+    # gdbus is intentionally NOT required — refresh_ibus_registry already
+    # guards its usage with `if shutil.which("gdbus") is not None`, so
+    # missing gdbus degrades gracefully (the KWin virtual-keyboard toggle
+    # is skipped) instead of blocking the whole install.
+    for cmd in ("python3", "systemctl", "rsync", "dconf"):
         require_command(cmd)
 
     step("Syncing runtime files")
