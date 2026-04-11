@@ -32,6 +32,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, NoReturn, Sequence
@@ -583,7 +584,6 @@ def run_full_install(ctx: InstallContext) -> int:
     step("Activating KDictate input method")
     # The KWin toggle relaunches ibus-daemon asynchronously. Retry a few
     # times so the engine activation doesn't race the daemon startup.
-    import time as _time
     for attempt in range(5):
         result = run_command(
             ["ibus", "engine", DBUS_INTERFACE],
@@ -592,7 +592,7 @@ def run_full_install(ctx: InstallContext) -> int:
         )
         if result.returncode == 0:
             break
-        _time.sleep(1)
+        time.sleep(1)
     step_done()
 
     print_summary(ctx)
