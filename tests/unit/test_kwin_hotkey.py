@@ -177,13 +177,28 @@ class KwinHotkeyListenerStartTest(unittest.TestCase):
         self.assertIn(CLIENT_NAME, str(ctx.exception))
 
 
+class _ManualClock:
+    """Controllable monotonic clock for press-dedupe tests."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0  # arbitrary non-zero start
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
 class KwinHotkeyListenerKeyEventTest(unittest.TestCase):
     def setUp(self) -> None:
         self.connection = _FakeConnection(request_name_reply=1)
         self.callback = MagicMock()
+        self.clock = _ManualClock()
         self.listener = KwinHotkeyListener(
             on_release=self.callback,
             connection=self.connection,
+            clock=self.clock,
         )
         self.listener._load_gi = lambda: _fake_gi()  # type: ignore[assignment]
         self.listener.start()
@@ -193,22 +208,55 @@ class KwinHotkeyListenerKeyEventTest(unittest.TestCase):
         # KWin payload: (released, state, keysym, unichar, keycode)
         self._fire(None, "", "", "", "", _FakeVariant((released, 0x04, keysym, 0, 65)))
 
-    def test_release_after_press_invokes_callback_once(self) -> None:
+    def test_press_invokes_callback_once(self) -> None:
+        self._send(released=False)
+        self.callback.assert_called_once_with()
+
+    def test_release_event_alone_does_not_invoke_callback(self) -> None:
+        # Releases are intentionally ignored — kwin only delivers a release
+        # KeyEvent when the mask still matches the grab, so a release-driven
+        # state machine would be permanently stuck if the user lifts Ctrl
+        # before Space.
+        self._send(released=True)
+        self.callback.assert_not_called()
+
+    def test_duplicate_press_fan_out_only_counts_once(self) -> None:
+        # KWin emits one KeyEvent per registered modifier mask permutation,
+        # so a single physical press fans out into ~4 events that arrive
+        # within microseconds. The dedupe window collapses them.
+        for _ in range(4):
+            self._send(released=False)
+        self.callback.assert_called_once_with()
+
+    def test_press_after_dedupe_window_fires_again(self) -> None:
+        # Two physical presses with a real gap between them must each fire.
+        self._send(released=False)
+        self.clock.advance(0.100)  # 100ms — well outside the 20ms window
+        self._send(released=False)
+        self.assertEqual(self.callback.call_count, 2)
+
+    def test_ctrl_first_release_does_not_lock_state(self) -> None:
+        # Regression test for the P2 codex finding (kwin_hotkey.py:264).
+        #
+        # Sequence: press Ctrl+Space → release Ctrl first (kwin drops the
+        # later Space release because the mask no longer matches our grab)
+        # → press Ctrl+Space again. The previous release-driven state
+        # machine left _key_held=True after the first activation and
+        # silently dropped every subsequent press until a "clean" release
+        # happened to land. The press-driven implementation must fire on
+        # both physical presses.
+        self._send(released=False)              # first press
+        # NOTE: no release event arrives here — that's the bug condition
+        self.clock.advance(0.250)               # user reaches for the key again
+        self._send(released=False)              # second press
+        self.assertEqual(self.callback.call_count, 2)
+
+    def test_press_followed_by_release_still_only_fires_once(self) -> None:
+        # The "happy path" sequence (release order Space-then-Ctrl, so
+        # kwin does deliver the release event) must not double-fire.
         self._send(released=False)
         self._send(released=True)
         self.callback.assert_called_once_with()
-
-    def test_duplicate_press_events_only_count_once(self) -> None:
-        # KWin emits one KeyEvent per registered modifier mask, so a single
-        # physical press can fire 4× before the matching release.
-        for _ in range(4):
-            self._send(released=False)
-        self._send(released=True)
-        self.callback.assert_called_once_with()
-
-    def test_release_without_prior_press_does_nothing(self) -> None:
-        self._send(released=True)
-        self.callback.assert_not_called()
 
     def test_other_keysyms_are_ignored(self) -> None:
         self._send(released=False, keysym=0x61)  # 'a'
@@ -217,9 +265,8 @@ class KwinHotkeyListenerKeyEventTest(unittest.TestCase):
 
     def test_callback_exceptions_do_not_propagate(self) -> None:
         self.callback.side_effect = RuntimeError("boom")
-        self._send(released=False)
         # Should not raise:
-        self._send(released=True)
+        self._send(released=False)
         self.callback.assert_called_once_with()
 
 

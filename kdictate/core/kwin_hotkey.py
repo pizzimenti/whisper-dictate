@@ -29,6 +29,7 @@ replace this module wholesale.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Callable, Iterable
 
 from kdictate.logging_utils import configure_logging
@@ -37,6 +38,14 @@ from kdictate.logging_utils import configure_logging
 DEFAULT_HOTKEY_KEYSYM = 0x0020  # XK_space
 DEFAULT_REQUIRED_MODIFIER_MASK = 0x04  # Control
 DEFAULT_IGNORED_MODIFIER_MASK = 0x12  # CapsLock + NumLock
+
+# KWin emits one KeyEvent per registered modifier mask permutation, so a
+# single physical Ctrl+Space press fans out into 4 events that all arrive
+# within microseconds of each other. Coalesce them into one activation by
+# rejecting press events that arrive within this window of the previous
+# accepted press. Set well above the kwin fan-out latency (~1ms) and well
+# below realistic intentional double-tap timing (~200ms).
+_PRESS_DEDUPE_WINDOW_S = 0.020
 
 CLIENT_NAME = "org.gnome.Orca.KeyboardMonitor"
 MONITOR_BUS_NAME = "org.freedesktop.a11y.Manager"
@@ -67,13 +76,23 @@ def expand_modifier_masks(required_mask: int, ignored_mask: int) -> list[int]:
 
 
 class KwinHotkeyListener:
-    """Hold the KWin accessibility key grab and forward releases to a callback.
+    """Hold the KWin accessibility key grab and forward presses to a callback.
 
-    The listener is constructed with a callable that runs whenever the
-    grabbed key is *released* (release-only mirrors the original
-    behavior — press triggers nothing). The callable runs on the GLib
-    main loop thread, so it must be quick and thread-safe; the daemon's
-    ``toggle()`` is the intended target.
+    The listener is constructed with a callable that fires once per
+    physical Ctrl+Space press. We act on press events rather than
+    release events because KWin only delivers a release KeyEvent when
+    the modifier mask still matches one of the grabs at release time —
+    if the user lifts Ctrl before Space, the Space release no longer
+    matches ``Ctrl+Space`` and kwin drops it on the floor, leaving a
+    release-driven state machine permanently stuck.
+
+    KWin's per-mask fan-out is coalesced via a short dedupe window
+    (``_PRESS_DEDUPE_WINDOW_S``): the first press in a window fires the
+    callback, and any further press events arriving inside that window
+    are treated as the same physical activation and ignored.
+
+    The callback runs on the GLib main loop thread, so it must be quick
+    and thread-safe; the daemon's ``toggle()`` is the intended target.
     """
 
     def __init__(
@@ -85,16 +104,23 @@ class KwinHotkeyListener:
         ignored_modifier_mask: int = DEFAULT_IGNORED_MODIFIER_MASK,
         logger: logging.Logger | None = None,
         connection: Any = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
-        self._on_release = on_release
+        # Parameter is named ``on_release`` for backwards compatibility
+        # with the previous release-driven implementation; semantically
+        # it now fires on press.
+        self._on_activate = on_release
         self._keysym = keysym
         self._required_modifier_mask = required_modifier_mask
         self._ignored_modifier_mask = ignored_modifier_mask
         self._logger = logger or configure_logging("kdictate.hotkey")
         self._connection = connection
+        self._clock = clock
         self._owns_name = False
         self._signal_subscription: int | None = None
-        self._key_held = False
+        # Sentinel: -inf means "no press yet seen", so the very first
+        # press always fires regardless of clock starting value.
+        self._last_press_time: float = float("-inf")
         self._masks = expand_modifier_masks(required_modifier_mask, ignored_modifier_mask)
 
     @property
@@ -254,19 +280,24 @@ class KwinHotkeyListener:
         released, state, keysym, _unichar, keycode = unpacked
         if keysym != self._keysym:
             return
-        if not released:
-            if self._key_held:
-                return
-            self._key_held = True
+        if released:
+            # Releases are intentionally ignored. KWin only delivers a
+            # release KeyEvent when the modifier mask still matches one
+            # of our grabs at release time, so a Ctrl-then-Space release
+            # order silently drops the release and would lock a release-
+            # driven state machine.
             return
-        if not self._key_held:
+        now = self._clock()
+        if now - self._last_press_time < _PRESS_DEDUPE_WINDOW_S:
+            # Per-mask fan-out from the same physical press. Same
+            # physical activation, no-op.
             return
-        self._key_held = False
-        self._logger.info("hotkey release state=0x%x keycode=%s", state, keycode)
+        self._last_press_time = now
+        self._logger.info("hotkey press state=0x%x keycode=%s", state, keycode)
         try:
-            self._on_release()
+            self._on_activate()
         except Exception:  # noqa: BLE001
-            self._logger.exception("hotkey release callback raised")
+            self._logger.exception("hotkey activation callback raised")
 
     def _load_gi(self) -> tuple[Any, Any]:
         try:
