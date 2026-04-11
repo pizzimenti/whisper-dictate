@@ -98,20 +98,20 @@ class DictationEngineController:
         """Record focus arrival and restore the current partial transcript."""
 
         self._state.focused = True
-        self._logger.info("IBus engine focus in")
+        self._logger.debug("IBus engine focus in")
         self._sync_preedit(reason="focus-in")
 
     def focus_out(self) -> None:
         """Record focus loss and clear visible preedit deterministically."""
 
         self._state.focused = False
-        self._logger.info("IBus engine focus out")
+        self._logger.debug("IBus engine focus out")
         self._hide_preedit(reason="focus-out")
 
     def reset(self) -> None:
         """Clear the visible preedit without changing focus ownership."""
 
-        self._logger.info("IBus engine reset")
+        self._logger.debug("IBus engine reset")
         self._hide_preedit(reason="reset")
 
     def set_daemon_available(self, available: bool) -> None:
@@ -174,7 +174,7 @@ class DictationEngineController:
                 )
             return
 
-        self._logger.info("Updating preedit from partial transcript: %s", normalized)
+        self._logger.debug("Updating preedit from partial transcript (%d chars)", len(normalized))
         self._show_preedit(normalized, self._live_mode())
 
     def handle_final_transcript(self, text: str) -> None:
@@ -200,7 +200,7 @@ class DictationEngineController:
             self._hide_preedit(reason="final-without-focus")
             return
 
-        self._logger.info("Committing final transcript through IBus: %s", normalized)
+        self._logger.info("Committing final transcript through IBus (%d chars)", len(normalized))
         self._hide_preedit(reason="final-before-commit")
         self._adapter.commit_text(normalized)
 

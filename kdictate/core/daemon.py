@@ -840,7 +840,7 @@ def _load_model_and_config(argv: list[str] | None = None) -> tuple[DictationConf
 def main(argv: list[str] | None = None) -> int:
     """Run the daemon as a long-lived GLib main loop process."""
 
-    logger = configure_logging("kdictate.core")
+    logger = configure_logging("kdictate.core", log_file="daemon.log")
     try:
         config, model, runtime = _load_model_and_config(argv)
     except (ConfigurationError, FileNotFoundError) as exc:
@@ -862,7 +862,7 @@ def main(argv: list[str] | None = None) -> int:
         logger.error("failed to import session service: %s", exc)
         return 1
 
-    service = SessionDbusService(daemon, logger=configure_logging("kdictate.dbus"))
+    service = SessionDbusService(daemon, logger=configure_logging("kdictate.dbus", log_file="daemon.log"))
 
     try:
         service.start()
