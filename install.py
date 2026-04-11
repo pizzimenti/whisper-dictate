@@ -416,27 +416,16 @@ def configure_kwin_input_method(ctx: InstallContext) -> None:
     )
 
 
-_KGLOBALACCEL_ACTION = [
-    TOGGLE_DESKTOP_NAME,
-    "_launch",
-    "KDictate Toggle",
-    "Toggle KDictate recording",
-]
-# Qt::ControlModifier (0x04000000) | Qt::Key_Space (0x20)
-_KGLOBALACCEL_CTRL_SPACE = 67108896
-
-
 def register_global_shortcut(ctx: InstallContext) -> None:
-    """Register Ctrl+Space for the KDictate toggle on the running KDE session.
+    """Persist a Ctrl+Space entry into kglobalshortcutsrc.
 
-    Two steps are needed because KDE6 splits persistence from runtime state:
-
-    1. Append a ``[services][...]`` entry to ``kglobalshortcutsrc`` so the
-       shortcut survives logout. kwin re-reads this file on session start.
-    2. Call ``org.kde.KGlobalAccel.doRegister`` + ``setShortcut`` on the
-       running session bus so the current kwin_wayland (which owns
-       ``org.kde.kglobalaccel`` on KDE6 Wayland) actually binds the key
-       without requiring a logout/login cycle.
+    The running daemon claims Ctrl+Space directly from kwin_wayland via
+    its accessibility KeyboardMonitor (see ``kdictate.core.kwin_hotkey``),
+    so the live binding does not depend on this file at all. The ini
+    entry is written purely as a fallback so KDE's kcontrol shows
+    Ctrl+Space as taken by KDictate Toggle, and so a future user that
+    disables the KeyboardMonitor grab still has a working shortcut after
+    the next session start.
     """
 
     shortcut_file = ctx.home / ".config" / "kglobalshortcutsrc"
@@ -444,38 +433,10 @@ def register_global_shortcut(ctx: InstallContext) -> None:
     entry = "_launch=Ctrl+Space, Ctrl+Space"
 
     content = shortcut_file.read_text(encoding="utf-8") if shortcut_file.exists() else ""
-    if section not in content:
-        content = content.rstrip("\n") + f"\n\n{section}\n{entry}\n"
-        shortcut_file.write_text(content, encoding="utf-8")
-
-    # Runtime registration with the running kglobalaccel owner (kwin on
-    # KDE6 Wayland). The ini entry above is not enough on its own — kwin
-    # only parses it at session start, so a fresh install needs this
-    # D-Bus kick to make the shortcut live immediately.
-    if shutil.which("gdbus") is None:
+    if section in content:
         return
-    action_json = (
-        "["
-        + ", ".join(f'"{part}"' for part in _KGLOBALACCEL_ACTION)
-        + "]"
-    )
-    kga_dest = "org.kde.kglobalaccel"
-    kga_path = "/kglobalaccel"
-    run_command(
-        ctx,
-        ["gdbus", "call", "--session",
-         "--dest", kga_dest, "--object-path", kga_path,
-         "--method", "org.kde.KGlobalAccel.doRegister", action_json],
-        as_user=True, quiet=True, check=False,
-    )
-    run_command(
-        ctx,
-        ["gdbus", "call", "--session",
-         "--dest", kga_dest, "--object-path", kga_path,
-         "--method", "org.kde.KGlobalAccel.setShortcut",
-         action_json, f"[{_KGLOBALACCEL_CTRL_SPACE}]", "uint32 0"],
-        as_user=True, quiet=True, check=False,
-    )
+    content = content.rstrip("\n") + f"\n\n{section}\n{entry}\n"
+    shortcut_file.write_text(content, encoding="utf-8")
 
 
 def refresh_ibus_registry(ctx: InstallContext) -> None:

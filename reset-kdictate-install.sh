@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# uninstall-preserve-model.sh
+# reset-kdictate-install.sh
 #
-# Wipe every kdictate and IBus artifact on the local machine, preserving
-# only the large model.bin so the Whisper model doesn't have to re-download.
+# Developer reset: wipe every kdictate, IBus, and KDE-shortcut artifact
+# on the local machine so a follow-up `./install.py` exercises the full
+# install path from a clean state. The Whisper model.bin is preserved
+# (it's multi-gigabyte and stable across resets) and restored after the
+# wipe so re-installs don't have to re-download it.
+#
 # Each step is verified and the script exits non-zero on any failure.
-#
-# After this script finishes successfully, run ./install.py to rebuild
-# everything from source.
+# After this script finishes, run `./install.py`.
 
 set -u
 
@@ -205,20 +207,6 @@ if [[ -f "$KGLOBAL_SHORTCUTS" ]]; then
     else
         ok "no kdictate section in $KGLOBAL_SHORTCUTS"
     fi
-fi
-
-# -- 10b. Drop the runtime binding from the running kglobalaccel owner ---
-# On KDE6 Wayland, kwin_wayland hosts org.kde.kglobalaccel and only reads
-# kglobalshortcutsrc at login. unRegister drops the binding in-session so
-# Ctrl+Space stops triggering before the user even logs out.
-
-if command -v gdbus >/dev/null; then
-    say "Unregistering Ctrl+Space from running kglobalaccel"
-    action='["io.github.pizzimenti.KDictateToggle.desktop", "_launch", "KDictate Toggle", "Toggle KDictate recording"]'
-    gdbus call --session --dest org.kde.kglobalaccel \
-        --object-path /kglobalaccel \
-        --method org.kde.KGlobalAccel.unRegister "$action" \
-        >/dev/null 2>&1 && ok "unRegister called" || warn "unRegister call failed (not fatal)"
 fi
 
 # -- 11. Wipe the IBus binary cache --------------------------------------

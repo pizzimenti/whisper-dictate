@@ -872,6 +872,22 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     daemon.set_event_sink(service)
 
+    # KWin Wayland sends Ctrl+Space to whoever owns the screen-reader
+    # KeyboardMonitor name. kglobalaccel/.desktop registration alone leaves
+    # the shortcut inactive on a fresh install, so claim that name here and
+    # forward releases straight into the daemon's toggle.
+    from kdictate.core.kwin_hotkey import KwinHotkeyListener
+
+    hotkey_listener: KwinHotkeyListener | None = KwinHotkeyListener(
+        on_release=daemon.toggle,
+        logger=configure_logging("kdictate.hotkey", log_file="daemon.log"),
+    )
+    try:
+        hotkey_listener.start()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("KWin hotkey listener disabled: %s", exc)
+        hotkey_listener = None
+
     loop = GLib.MainLoop()
 
     def _on_sigterm() -> bool:
@@ -885,6 +901,11 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         pass
     finally:
+        if hotkey_listener is not None:
+            try:
+                hotkey_listener.stop()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("KWin hotkey listener stop failed: %s", exc)
         daemon.shutdown()
         service.stop()
 

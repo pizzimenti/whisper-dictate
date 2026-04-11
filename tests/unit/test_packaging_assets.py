@@ -114,6 +114,4 @@ class PackagingAssetTests(unittest.TestCase):
         self.assertIn("kbuildsycoca6", install_script)
         self.assertIn('"ibus", "write-cache"', install_script)
         self.assertIn("org.kde.kwin.VirtualKeyboard", install_script)
-        self.assertIn("org.kde.KGlobalAccel.doRegister", install_script)
-        self.assertIn("org.kde.KGlobalAccel.setShortcut", install_script)
         self.assertIn("Toggle.desktop", install_script)
