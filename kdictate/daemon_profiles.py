@@ -24,5 +24,5 @@ def daemon_arg_defaults() -> dict[str, object]:
         "silence_ms": 300,
         "min_speech_ms": 180,
         "start_speech_ms": 150,
-        "max_utterance_s": 5.0,
+        "max_utterance_s": 10.0,
     }
