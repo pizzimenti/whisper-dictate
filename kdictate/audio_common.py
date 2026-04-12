@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import queue
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -62,6 +63,7 @@ def transcribe_pcm(
     if audio.size == 0:
         return ""
 
+    t0 = time.monotonic()
     segments, _ = model.transcribe(
         audio,
         language=language,
@@ -74,7 +76,13 @@ def transcribe_pcm(
         no_speech_threshold=no_speech_threshold,
         without_timestamps=True,
     )
-    text = " ".join(s.text.strip() for s in segments if s.text and s.text.strip()).strip()
+    seg_texts = [s.text.strip() for s in segments if s.text and s.text.strip()]
+    elapsed = time.monotonic() - t0
+    text = " ".join(seg_texts).strip()
+    logger.info(
+        "transcribe_pcm: %.1fs, %d segments, %d chars",
+        elapsed, len(seg_texts), len(text),
+    )
     if not text:
         return ""
     return " ".join(text.replace("\r", " ").replace("\n", " ").split())
@@ -227,5 +235,6 @@ class VADSegmenter:
             # case of a fully-saturated utterance_queue.
             try:
                 self.utterance_queue.put(None, timeout=1.0)
+                logger.info("vad sentinel posted")
             except Exception:  # noqa: BLE001
-                pass
+                logger.warning("vad sentinel post failed (queue full or timeout)")

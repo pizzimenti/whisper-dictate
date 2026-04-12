@@ -156,9 +156,10 @@ works across AMD, NVIDIA, and Intel GPUs.
    ```bash
    python3 install.py
    ```
-   If GPU mode is selected, the installer downloads the Q8_0 GGML
-   model (~874 MB) and configures the systemd service with
-   `--backend auto` (try GPU, fall back to CPU).
+   If GPU mode is selected, the installer downloads only the Q8_0
+   GGML model (~874 MB) and configures the systemd service with
+   `--backend gpu`.  CPU mode downloads the CTranslate2 model
+   (~780 MB) and uses the default CPU backend.
 
 See `docs/gpu-mode.md` for architecture details and benchmark results.
 

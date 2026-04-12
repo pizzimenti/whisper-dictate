@@ -84,7 +84,7 @@ class InstallContext:
             "@@ENGINE_EXEC@@": str(self.engine_exec),
             "@@HOME@@": str(self.home),
             "@@APP_VERSION@@": __version__,
-            "@@BACKEND_FLAGS@@": " --backend auto" if self.gpu else "",
+            "@@BACKEND_FLAGS@@": " --backend gpu" if self.gpu else "",
         }
 
 
@@ -440,10 +440,6 @@ def main() -> int:
             home=ctx.home, runtime_dir=ctx.runtime_dir, gpu=True,
         )
 
-    global _TOTAL_STEPS  # noqa: PLW0603
-    if gpu:
-        _TOTAL_STEPS += 1
-
     print()
     preflight_ibus()
     for cmd in ("python3", "systemctl", "rsync", "dconf"):
@@ -459,16 +455,16 @@ def main() -> int:
     install_python_environment(ctx)
     step_done()
 
-    step("Downloading CPU model")
-    print(flush=True)
-    download_cpu_model(ctx)
-    step_done(DEFAULT_MODEL_HF_REPO)
-
     if gpu:
         step("Downloading GPU model")
         print(flush=True)
         download_gpu_model(ctx)
         step_done(GGML_MODEL_HF_REPO)
+    else:
+        step("Downloading CPU model")
+        print(flush=True)
+        download_cpu_model(ctx)
+        step_done(DEFAULT_MODEL_HF_REPO)
 
     step("Installing systemd user service")
     install_rendered_file(ctx, pkg / "kdictate-systemd.service",
