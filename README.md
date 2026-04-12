@@ -16,8 +16,9 @@ The system is split into two cooperating processes that talk over session D-Bus:
    allowed to place text into applications; it consumes daemon transcript
    events and maps them to IBus preedit and commit.
 
-This project uses `openai/whisper-large-v3-turbo` converted to CTranslate2 int8 for
-local English dictation on CPU.
+This project uses `openai/whisper-large-v3-turbo` for local English dictation.
+CPU mode uses CTranslate2 int8; GPU mode uses whisper.cpp with Vulkan (Q8_0).
+The installer auto-detects GPU availability and prompts you to choose.
 
 > KWin Wayland + IBus is the supported configuration. On GNOME or other Wayland
 > compositors the daemon + IBus engine path *may* work but is untested.
@@ -44,7 +45,7 @@ registration, and KDE integration:
 python3 install.py
 ```
 
-It installs `ibus`, sets up the Python environment, registers the
+It sets up the Python environment, downloads the model, registers the
 `io.github.pizzimenti.KDictate.service` systemd user unit, installs the D-Bus
 activation file, places the IBus component metadata under the current user's data
 directory, writes `~/.config/environment.d/60-kdictate-ibus.conf` so IBus can
