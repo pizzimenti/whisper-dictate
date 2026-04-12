@@ -137,15 +137,50 @@ The daemon and helpers coordinate through two files under `XDG_RUNTIME_DIR`:
 The daemon owns writes to those files. The CLI reads them so control/status
 behavior stays consistent across shells and user services.
 
+## GPU mode (optional)
+
+KDictate can optionally use whisper.cpp with Vulkan for GPU-accelerated
+transcription. This can reduce the ~5s per-utterance decode time on CPU
+to ~1-2s on supported GPUs. No vendor-specific drivers (ROCm, CUDA) are
+required -- Vulkan works across AMD, NVIDIA, and Intel GPUs.
+
+### Setup
+
+1. Install whisper.cpp with Vulkan support:
+   ```bash
+   # Arch / Manjaro (AUR)
+   yay -S whisper.cpp-vulkan
+   ```
+
+2. Download the GGML model during install:
+   ```bash
+   python3 install.py --gpu
+   ```
+   Or download manually:
+   ```bash
+   pip install huggingface_hub
+   python3 -c "from huggingface_hub import hf_hub_download; hf_hub_download('ggerganov/whisper.cpp', 'ggml-large-v3-turbo.bin', local_dir='$HOME/.local/share/kdictate')"
+   ```
+
+3. Start the daemon with GPU backend:
+   ```bash
+   kdictate-daemon --backend gpu    # require GPU, fail if unavailable
+   kdictate-daemon --backend auto   # try GPU, fall back to CPU
+   ```
+
+The default is `--backend cpu` which uses faster-whisper and requires no
+extra dependencies.
+
 ## Tuning
 
+- `--backend cpu|gpu|auto`: transcription backend (default: cpu).
 - `--cpu-threads N`: override thread count. Dictation-oriented defaults now use physical cores / short-form-friendly thread counts.
 - `--compute-type int8|float16|float32`: precision/runtime tradeoff.
 - `--language`: defaults to `en`.
 - `--beam-size`: daemon and live CLI default to 1.
 - `--state-file`: daemon runtime state file path (default: `$XDG_RUNTIME_DIR/kdictate-<uid>.state`).
 - `--last-text-file`: latest transcript cache path (default: `$XDG_RUNTIME_DIR/kdictate-<uid>.last.txt`).
-- `--vad-filter/--no-vad-filter`: daemon defaults to `vad_filter=False` for lower-latency short-form dictation.
+- `--vad-filter/--no-vad-filter`: daemon defaults to `vad_filter=True` to catch silence before the encoder.
 - `--condition-on-previous-text/--no-condition-on-previous-text`: daemon defaults to `False` to reduce cascading hallucinations.
 - `--no-speech-threshold`: Whisper-side non-speech rejection. The daemon defaults to `0.6`.
 - `--energy-threshold`, `--start-speech-ms`, `--silence-ms`, `--max-utterance-s`: live CLI utterance-boundary controls.

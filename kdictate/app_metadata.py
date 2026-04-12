@@ -22,3 +22,9 @@ DEFAULT_MODEL_HF_REPO: Final[str] = "mobiuslabsgmbh/faster-whisper-large-v3-turb
 DEFAULT_MODEL_NAME: Final[str] = "whisper-large-v3-turbo-ct2"
 PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parent.parent
 DEFAULT_MODEL_DIR: Final[Path] = PROJECT_ROOT / DEFAULT_MODEL_NAME
+
+GGML_MODEL_HF_REPO: Final[str] = "ggerganov/whisper.cpp"
+GGML_MODEL_FILENAME: Final[str] = "ggml-large-v3-turbo.bin"
+GGML_MODEL_PATH: Final[Path] = (
+    Path.home() / ".local" / "share" / "kdictate" / GGML_MODEL_FILENAME
+)

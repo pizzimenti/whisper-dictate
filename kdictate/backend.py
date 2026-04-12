@@ -15,12 +15,9 @@ import wave
 from pathlib import Path
 from typing import Any, Protocol
 
-logger = logging.getLogger("kdictate.daemon.backend")
+from kdictate.app_metadata import GGML_MODEL_PATH
 
-# Default GGML model path, parallel to the CTranslate2 model directory.
-_DEFAULT_GGML_MODEL = (
-    Path.home() / ".local" / "share" / "kdictate" / "ggml-large-v3-turbo.bin"
-)
+logger = logging.getLogger("kdictate.daemon.backend")
 
 
 class TranscriptionBackend(Protocol):
@@ -181,6 +178,46 @@ def create_cpu_backend(model: Any, config: Any) -> FasterWhisperBackend:
     )
 
 
+def _probe_whisper_cpp(binary: str, model_path: str) -> bool:
+    """Run a minimal whisper.cpp invocation to verify it starts correctly.
+
+    Feeds a tiny silent WAV to whisper.cpp. If it exits 0, the binary,
+    model, and GPU driver are all working. This catches Vulkan driver
+    failures, missing shared libraries, and corrupt model files before
+    real dictation starts.
+    """
+    import numpy as np
+
+    silent_pcm = [np.zeros(16000, dtype=np.int16)]  # 1s silence
+    wav_bytes = _pcm_to_wav_bytes(silent_pcm)
+
+    try:
+        result = subprocess.run(
+            [
+                binary,
+                "--model", model_path,
+                "--language", "en",
+                "--no-timestamps",
+                "--no-prints",
+                "--file", "-",
+            ],
+            input=wav_bytes,
+            capture_output=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("whisper.cpp probe failed: %s", exc)
+        return False
+
+    if result.returncode != 0:
+        stderr = result.stderr.decode(errors="replace").strip()
+        logger.warning("whisper.cpp probe exited %d: %s", result.returncode, stderr[:300])
+        return False
+
+    logger.info("whisper.cpp probe succeeded")
+    return True
+
+
 def create_gpu_backend(config: Any, ggml_model: str | Path | None = None,
                        ) -> WhisperCppBackend | None:
     """Try to build a whisper.cpp GPU backend. Returns None on failure."""
@@ -189,12 +226,17 @@ def create_gpu_backend(config: Any, ggml_model: str | Path | None = None,
         logger.info("whisper.cpp not found on PATH; GPU backend unavailable")
         return None
 
-    model_path = Path(ggml_model) if ggml_model else _DEFAULT_GGML_MODEL
+    model_path = Path(ggml_model) if ggml_model else GGML_MODEL_PATH
     if not model_path.is_file():
         logger.info("GGML model not found at %s; GPU backend unavailable", model_path)
         return None
 
     logger.info("GPU backend: whisper.cpp=%s model=%s", binary, model_path)
+
+    if not _probe_whisper_cpp(binary, str(model_path)):
+        logger.warning("whisper.cpp probe failed; GPU backend unavailable")
+        return None
+
     return WhisperCppBackend(
         binary,
         model_path,

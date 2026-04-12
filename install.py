@@ -38,7 +38,13 @@ from pathlib import Path
 from typing import Mapping, NoReturn, Sequence
 
 from kdictate import __version__
-from kdictate.app_metadata import DEFAULT_MODEL_HF_REPO, DEFAULT_MODEL_NAME
+from kdictate.app_metadata import (
+    DEFAULT_MODEL_HF_REPO,
+    DEFAULT_MODEL_NAME,
+    GGML_MODEL_FILENAME,
+    GGML_MODEL_HF_REPO,
+    GGML_MODEL_PATH,
+)
 from kdictate.constants import APP_ROOT_ID, DBUS_INTERFACE
 
 SERVICE_NAME = f"{APP_ROOT_ID}.service"
@@ -292,6 +298,34 @@ def download_model(ctx: InstallContext) -> None:
     )
 
 
+def download_ggml_model(ctx: InstallContext) -> None:
+    """Download the GGML-format Whisper model for whisper.cpp GPU mode.
+
+    Uses huggingface_hub.hf_hub_download to fetch a single file from the
+    ggerganov/whisper.cpp repo. Skips if the file already exists.
+    """
+
+    if GGML_MODEL_PATH.is_file():
+        log(f"GGML model already exists at {GGML_MODEL_PATH}")
+        return
+
+    GGML_MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        [
+            str(ctx.python_bin),
+            "-u",
+            "-c",
+            (
+                "from huggingface_hub import hf_hub_download; "
+                f"hf_hub_download(repo_id={GGML_MODEL_HF_REPO!r}, "
+                f"filename={GGML_MODEL_FILENAME!r}, "
+                f"local_dir={str(GGML_MODEL_PATH.parent)!r})"
+            ),
+        ],
+        check=True,
+    )
+
+
 def next_preload_engines(current_preload: str, engine_id: str) -> str | None:
     """Return the updated preload list or ``None`` when no change is needed."""
 
@@ -515,8 +549,12 @@ def preflight_ibus() -> None:
     )
 
 
-def run_full_install(ctx: InstallContext) -> int:
+def run_full_install(ctx: InstallContext, *, gpu: bool = False) -> int:
     """Perform the full install flow as the invoking user."""
+
+    global _TOTAL_STEPS  # noqa: PLW0603
+    if gpu:
+        _TOTAL_STEPS += 1
 
     print(f"\n  KDictate {__version__} installer\n")
 
@@ -540,6 +578,12 @@ def run_full_install(ctx: InstallContext) -> int:
     print(flush=True)  # newline so tqdm progress gets its own lines
     download_model(ctx)
     step_done(DEFAULT_MODEL_HF_REPO)
+
+    if gpu:
+        step("Downloading GGML model for GPU mode")
+        print(flush=True)
+        download_ggml_model(ctx)
+        step_done(GGML_MODEL_HF_REPO)
 
     step("Installing systemd user service")
     install_rendered_file(ctx, ctx.script_dir / "packaging" / "kdictate-systemd.service",
@@ -608,7 +652,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args == ["--sync-only"]:
         return run_sync_only(ctx)
 
-    return run_full_install(ctx)
+    gpu = "--gpu" in args
+    return run_full_install(ctx, gpu=gpu)
 
 
 if __name__ == "__main__":
