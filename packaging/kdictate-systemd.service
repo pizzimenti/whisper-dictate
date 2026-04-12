@@ -5,7 +5,7 @@ After=graphical-session.target sound.target
 [Service]
 Type=simple
 WorkingDirectory=@@REPO_DIR@@
-ExecStart=@@REPO_DIR@@/.venv/bin/kdictate-daemon
+ExecStart=@@REPO_DIR@@/.venv/bin/kdictate-daemon@@BACKEND_FLAGS@@
 Restart=on-failure
 RestartSec=5
 

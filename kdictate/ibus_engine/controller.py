@@ -52,6 +52,7 @@ class EngineState:
     last_error_code: str = ""
     last_error_message: str = ""
     preedit_visible: bool = False
+    deferred_text: str = ""
 
 
 class DictationEngineController:
@@ -91,14 +92,36 @@ class DictationEngineController:
             self._logger.info("IBus engine disable requested while already disabled")
         self._state.enabled = False
         self._state.focused = False
+        self._state.deferred_text = ""
         self._hide_preedit(reason="disable")
         self._logger.info("IBus engine disabled")
 
     def focus_in(self) -> None:
-        """Record focus arrival and restore the current partial transcript."""
+        """Record focus arrival, flush deferred text if still dictating, and
+        restore the current partial transcript."""
 
         self._state.focused = True
         self._logger.debug("IBus engine focus in")
+
+        if self._state.deferred_text:
+            still_dictating = (
+                self._state.enabled
+                and self._state.daemon_available
+                and self._state.daemon_state in {STATE_RECORDING, STATE_TRANSCRIBING}
+            )
+            if still_dictating:
+                self._logger.info(
+                    "Flushing deferred text on focus return (%d chars)",
+                    len(self._state.deferred_text),
+                )
+                self._adapter.commit_text(self._state.deferred_text)
+            else:
+                self._logger.info(
+                    "Discarding deferred text (dictation ended while unfocused, %d chars)",
+                    len(self._state.deferred_text),
+                )
+            self._state.deferred_text = ""
+
         self._sync_preedit(reason="focus-in")
 
     def focus_out(self) -> None:
@@ -145,6 +168,12 @@ class DictationEngineController:
 
         if state in {STATE_IDLE, STATE_STARTING, STATE_ERROR}:
             self._state.pending_partial = ""
+            if self._state.deferred_text:
+                self._logger.info(
+                    "Discarding deferred text on state %s (%d chars)",
+                    state, len(self._state.deferred_text),
+                )
+                self._state.deferred_text = ""
             self._hide_preedit(reason=f"state-{state}")
             return
 
@@ -190,14 +219,12 @@ class DictationEngineController:
             return
 
         if not self._can_commit_final():
-            self._logger.warning(
-                "Dropping final transcript without a safe focus target: daemon=%s focused=%s enabled=%s state=%s",
-                self._state.daemon_available,
-                self._state.focused,
-                self._state.enabled,
-                self._state.daemon_state,
+            self._state.deferred_text += (" " + normalized if self._state.deferred_text else normalized)
+            self._logger.info(
+                "Deferred final transcript (no focus): %d chars, total deferred %d chars",
+                len(normalized), len(self._state.deferred_text),
             )
-            self._hide_preedit(reason="final-without-focus")
+            self._hide_preedit(reason="final-deferred")
             return
 
         self._logger.info("Committing final transcript through IBus (%d chars)", len(normalized))

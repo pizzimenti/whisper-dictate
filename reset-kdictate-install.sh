@@ -3,9 +3,9 @@
 #
 # Developer reset: wipe every kdictate, IBus, and KDE-shortcut artifact
 # on the local machine so a follow-up `./install.py` exercises the full
-# install path from a clean state. The Whisper model.bin is preserved
-# (it's multi-gigabyte and stable across resets) and restored after the
-# wipe so re-installs don't have to re-download it.
+# install path from a clean state. Model files (CPU model.bin and GPU
+# ggml-large-v3-turbo-q8_0.bin) are preserved and restored after the
+# wipe so re-installs don't have to re-download them.
 #
 # Each step is verified and the script exits non-zero on any failure.
 # After this script finishes, run `./install.py`.
@@ -17,7 +17,8 @@ set -u
 RUNTIME_DIR="$HOME/.local/share/kdictate"
 MODEL_DIR="$RUNTIME_DIR/whisper-large-v3-turbo-ct2"
 MODEL_BIN="$MODEL_DIR/model.bin"
-STAGE_DIR="/tmp/kdictate-model-stage-$$"
+GGML_BIN="$RUNTIME_DIR/ggml-large-v3-turbo-q8_0.bin"
+STAGE_DIR=$(mktemp -d /tmp/kdictate-model-stage.XXXXXXXXXX) || { echo "mktemp failed" >&2; exit 1; }
 
 STATE_DIR="$HOME/.local/state/kdictate"
 IBUS_CACHE="$HOME/.cache/ibus"
@@ -101,23 +102,26 @@ fi
 
 # -- 4. Preserve model.bin ------------------------------------------------
 
-if [[ -f "$MODEL_BIN" ]]; then
-    say "Preserving model.bin to $STAGE_DIR"
-    mkdir -p "$STAGE_DIR"
-    if cp -a "$MODEL_BIN" "$STAGE_DIR/model.bin"; then
-        src_size=$(stat -c %s "$MODEL_BIN")
-        dst_size=$(stat -c %s "$STAGE_DIR/model.bin")
-        if [[ "$src_size" == "$dst_size" ]]; then
-            ok "model.bin staged ($src_size bytes)"
+say "Preserving model files to $STAGE_DIR"
+for src in "$MODEL_BIN" "$GGML_BIN"; do
+    name=$(basename "$src")
+    if [[ -f "$src" ]]; then
+        if cp -a "$src" "$STAGE_DIR/$name"; then
+            src_size=$(stat -c %s "$src")
+            dst_size=$(stat -c %s "$STAGE_DIR/$name")
+            if [[ "$src_size" == "$dst_size" ]]; then
+                ok "$name staged ($src_size bytes)"
+            else
+                fail "staged $name size mismatch ($src_size vs $dst_size)"
+                rm -f "$STAGE_DIR/$name"
+            fi
         else
-            fail "staged model.bin size mismatch ($src_size vs $dst_size)"
+            fail "failed to stage $name"
         fi
     else
-        fail "failed to stage model.bin"
+        warn "$name not found -- reinstall will re-download if needed"
     fi
-else
-    warn "no model.bin found at $MODEL_BIN -- reinstall will re-download"
-fi
+done
 
 # -- 5. Wipe runtime dir --------------------------------------------------
 
@@ -314,17 +318,24 @@ fi
 
 # -- 16. Restore model.bin into the (now empty) runtime dir --------------
 
+say "Restoring model files"
 if [[ -f "$STAGE_DIR/model.bin" ]]; then
-    say "Restoring model.bin to $MODEL_DIR"
     mkdir -p "$MODEL_DIR"
     if mv "$STAGE_DIR/model.bin" "$MODEL_DIR/model.bin"; then
-        dst_size=$(stat -c %s "$MODEL_DIR/model.bin")
-        ok "model.bin restored ($dst_size bytes)"
-        rmdir "$STAGE_DIR" 2>/dev/null || true
+        ok "model.bin restored ($(stat -c %s "$MODEL_DIR/model.bin") bytes)"
     else
-        fail "failed to restore model.bin from stage"
+        fail "failed to restore model.bin"
     fi
 fi
+if [[ -f "$STAGE_DIR/$(basename "$GGML_BIN")" ]]; then
+    mkdir -p "$RUNTIME_DIR"
+    if mv "$STAGE_DIR/$(basename "$GGML_BIN")" "$GGML_BIN"; then
+        ok "$(basename "$GGML_BIN") restored ($(stat -c %s "$GGML_BIN") bytes)"
+    else
+        fail "failed to restore $(basename "$GGML_BIN")"
+    fi
+fi
+rmdir "$STAGE_DIR" 2>/dev/null || true
 
 # -- summary --------------------------------------------------------------
 

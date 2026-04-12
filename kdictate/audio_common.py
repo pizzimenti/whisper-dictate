@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import queue
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger("kdictate.daemon.vad")
 
 VAD_QUEUE_POLL_TIMEOUT_S = 0.15
 AUDIO_QUEUE_MAXSIZE = 512    # ~15s of 30ms blocks at 16kHz
@@ -59,6 +63,7 @@ def transcribe_pcm(
     if audio.size == 0:
         return ""
 
+    t0 = time.monotonic()
     segments, _ = model.transcribe(
         audio,
         language=language,
@@ -71,7 +76,13 @@ def transcribe_pcm(
         no_speech_threshold=no_speech_threshold,
         without_timestamps=True,
     )
-    text = " ".join(s.text.strip() for s in segments if s.text and s.text.strip()).strip()
+    seg_texts = [s.text.strip() for s in segments if s.text and s.text.strip()]
+    elapsed = time.monotonic() - t0
+    text = " ".join(seg_texts).strip()
+    logger.info(
+        "transcribe_pcm: %.1fs, %d segments, %d chars",
+        elapsed, len(seg_texts), len(text),
+    )
     if not text:
         return ""
     return " ".join(text.replace("\r", " ").replace("\n", " ").split())
@@ -83,7 +94,7 @@ class VADConfig:
 
     sample_rate: int = 16000
     block_ms: int = 30
-    energy_threshold: float = 600.0
+    energy_threshold: float = 1500.0
     silence_ms: int = 300
     min_speech_ms: int = 180
     start_speech_ms: int = 90
@@ -152,10 +163,15 @@ class VADSegmenter:
             nonlocal trailing_silence_count, utterance_pcm, pending_speech_pcm, pending_silence_pcm
             if speech_block_count >= min_speech_blocks and utterance_pcm:
                 audio_seconds = sum(len(c) for c in utterance_pcm) / float(cfg.sample_rate)
+                pending = self.utterance_queue.qsize()
                 try:
                     self.utterance_queue.put_nowait((list(utterance_pcm), audio_seconds))
+                    logger.info(
+                        "utterance committed: %.1fs audio, %d blocks, %d queued",
+                        audio_seconds, speech_block_count, pending,
+                    )
                 except queue.Full:
-                    pass
+                    logger.warning("utterance dropped (queue full): %.1fs audio", audio_seconds)
             in_speech = False
             speech_block_count = 0
             pending_speech_block_count = 0
@@ -180,6 +196,7 @@ class VADSegmenter:
                         pending_speech_block_count += 1
                         if pending_speech_block_count >= start_speech_blocks:
                             in_speech = True
+                            logger.info("speech started (rms=%.0f)", rms)
                             utterance_pcm = list(pending_speech_pcm)
                             speech_block_count = len(utterance_pcm)
                             pending_speech_pcm = []
@@ -201,6 +218,7 @@ class VADSegmenter:
                     pending_speech_block_count = 0
 
                 if in_speech and speech_block_count >= max_utterance_blocks:
+                    logger.info("force-commit (max utterance reached)")
                     commit()
                     continue
 
@@ -217,5 +235,6 @@ class VADSegmenter:
             # case of a fully-saturated utterance_queue.
             try:
                 self.utterance_queue.put(None, timeout=1.0)
+                logger.info("vad sentinel posted")
             except Exception:  # noqa: BLE001
-                pass
+                logger.warning("vad sentinel post failed (queue full or timeout)")

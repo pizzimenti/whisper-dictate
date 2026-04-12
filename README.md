@@ -41,7 +41,7 @@ download (~780 MB from HuggingFace on first run), systemd/D-Bus/IBus
 registration, and KDE integration:
 
 ```bash
-sudo python3 install.py
+python3 install.py
 ```
 
 It installs `ibus`, sets up the Python environment, registers the
@@ -137,15 +137,42 @@ The daemon and helpers coordinate through two files under `XDG_RUNTIME_DIR`:
 The daemon owns writes to those files. The CLI reads them so control/status
 behavior stays consistent across shells and user services.
 
+## GPU mode (optional)
+
+KDictate can optionally use whisper.cpp with Vulkan for GPU-accelerated
+transcription.  This cuts the ~5s per-utterance decode time on CPU to
+~2.5s.  No vendor-specific drivers (ROCm, CUDA) are required — Vulkan
+works across AMD, NVIDIA, and Intel GPUs.
+
+### Setup
+
+1. Install whisper.cpp with Vulkan support:
+   ```bash
+   # Arch / Manjaro (AUR)
+   yay -S whisper.cpp-vulkan
+   ```
+
+2. Run the installer — it detects GPU availability and prompts:
+   ```bash
+   python3 install.py
+   ```
+   If GPU mode is selected, the installer downloads only the Q8_0
+   GGML model (~874 MB) and configures the systemd service with
+   `--backend gpu`.  CPU mode downloads the CTranslate2 model
+   (~780 MB) and uses the default CPU backend.
+
+See `docs/gpu-mode.md` for architecture details and benchmark results.
+
 ## Tuning
 
+- `--backend cpu|gpu|auto`: transcription backend (default: cpu).
 - `--cpu-threads N`: override thread count. Dictation-oriented defaults now use physical cores / short-form-friendly thread counts.
 - `--compute-type int8|float16|float32`: precision/runtime tradeoff.
 - `--language`: defaults to `en`.
 - `--beam-size`: daemon and live CLI default to 1.
 - `--state-file`: daemon runtime state file path (default: `$XDG_RUNTIME_DIR/kdictate-<uid>.state`).
 - `--last-text-file`: latest transcript cache path (default: `$XDG_RUNTIME_DIR/kdictate-<uid>.last.txt`).
-- `--vad-filter/--no-vad-filter`: daemon defaults to `vad_filter=False` for lower-latency short-form dictation.
+- `--vad-filter/--no-vad-filter`: daemon defaults to `vad_filter=True` to catch silence before the encoder.
 - `--condition-on-previous-text/--no-condition-on-previous-text`: daemon defaults to `False` to reduce cascading hallucinations.
 - `--no-speech-threshold`: Whisper-side non-speech rejection. The daemon defaults to `0.6`.
 - `--energy-threshold`, `--start-speech-ms`, `--silence-ms`, `--max-utterance-s`: live CLI utterance-boundary controls.
@@ -170,5 +197,5 @@ behavior stays consistent across shells and user services.
 
 ## Notes
 
-- CPU-only; no CUDA or ROCm required.
+- CPU by default; optional GPU acceleration via Vulkan (no CUDA or ROCm required).
 - The model (`Systran/faster-whisper-large-v3-turbo`, ~780 MB) is downloaded automatically on first install to `~/.local/share/kdictate/whisper-large-v3-turbo-ct2/`. Subsequent installs skip the download if the directory exists.

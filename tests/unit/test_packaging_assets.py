@@ -22,6 +22,7 @@ class PackagingAssetTests(unittest.TestCase):
             .replace("@@ENGINE_EXEC@@", "/tmp/ibus-engine-kdictate")
             .replace("@@REPO_DIR@@", "/tmp/kdictate")
             .replace("@@HOME@@", "/tmp/home")
+            .replace("@@BACKEND_FLAGS@@", "")
         )
 
     def test_component_metadata_matches_root_identity(self) -> None:
