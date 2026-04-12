@@ -182,29 +182,32 @@ def _prompt_backend() -> bool:
     """Auto-detect GPU and ask the user.  Returns True for GPU mode."""
     binary, reasons = _detect_gpu()
 
-    if not reasons:
-        print("  GPU acceleration is available:\n")
-        print(f"    whisper.cpp: {binary}")
-        print("    Vulkan:      supported\n")
-        print("    [1] GPU mode  (whisper.cpp + Vulkan, faster)")
-        print("    [2] CPU mode  (faster-whisper, no extra deps)\n")
-        while True:
-            choice = input("  Select [1/2]: ").strip()
-            if choice == "1":
-                return True
-            if choice == "2":
-                return False
-    else:
-        print("  GPU acceleration is not available:\n")
-        for reason in reasons:
-            print(f"    - {reason}")
-        print()
-        while True:
-            choice = input("  Proceed with CPU-only install? [Y/n]: ").strip().lower()
-            if choice in ("", "y", "yes"):
-                return False
-            if choice in ("n", "no"):
-                die("Install cancelled.")
+    try:
+        if not reasons:
+            print("  GPU acceleration is available:\n")
+            print(f"    whisper.cpp: {binary}")
+            print("    Vulkan:      supported\n")
+            print("    [1] GPU mode  (whisper.cpp + Vulkan, faster)")
+            print("    [2] CPU mode  (faster-whisper, no extra deps)\n")
+            while True:
+                choice = input("  Select [1/2] (default: 1): ").strip()
+                if choice in ("", "1"):
+                    return True
+                if choice == "2":
+                    return False
+        else:
+            print("  GPU acceleration is not available:\n")
+            for reason in reasons:
+                print(f"    - {reason}")
+            print()
+            while True:
+                choice = input("  Proceed with CPU-only install? [Y/n]: ").strip().lower()
+                if choice in ("", "y", "yes"):
+                    return False
+                if choice in ("n", "no"):
+                    die("Install cancelled.")
+    except EOFError:
+        die("No interactive input available. Run install.py from a terminal.")
 
     return False
 
