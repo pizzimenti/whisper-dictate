@@ -92,6 +92,7 @@ class DictationEngineController:
             self._logger.info("IBus engine disable requested while already disabled")
         self._state.enabled = False
         self._state.focused = False
+        self._state.deferred_text = ""
         self._hide_preedit(reason="disable")
         self._logger.info("IBus engine disabled")
 
@@ -103,7 +104,12 @@ class DictationEngineController:
         self._logger.debug("IBus engine focus in")
 
         if self._state.deferred_text:
-            if self._state.daemon_state in {STATE_RECORDING, STATE_TRANSCRIBING}:
+            still_dictating = (
+                self._state.enabled
+                and self._state.daemon_available
+                and self._state.daemon_state in {STATE_RECORDING, STATE_TRANSCRIBING}
+            )
+            if still_dictating:
                 self._logger.info(
                     "Flushing deferred text on focus return (%d chars)",
                     len(self._state.deferred_text),

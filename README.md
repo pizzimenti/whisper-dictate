@@ -41,7 +41,7 @@ download (~780 MB from HuggingFace on first run), systemd/D-Bus/IBus
 registration, and KDE integration:
 
 ```bash
-sudo python3 install.py
+python3 install.py
 ```
 
 It installs `ibus`, sets up the Python environment, registers the

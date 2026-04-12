@@ -18,7 +18,7 @@ RUNTIME_DIR="$HOME/.local/share/kdictate"
 MODEL_DIR="$RUNTIME_DIR/whisper-large-v3-turbo-ct2"
 MODEL_BIN="$MODEL_DIR/model.bin"
 GGML_BIN="$RUNTIME_DIR/ggml-large-v3-turbo-q8_0.bin"
-STAGE_DIR=$(mktemp -d /tmp/kdictate-model-stage.XXXXXXXXXX)
+STAGE_DIR=$(mktemp -d /tmp/kdictate-model-stage.XXXXXXXXXX) || { echo "mktemp failed" >&2; exit 1; }
 
 STATE_DIR="$HOME/.local/state/kdictate"
 IBUS_CACHE="$HOME/.cache/ibus"
