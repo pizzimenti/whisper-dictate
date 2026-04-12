@@ -72,6 +72,19 @@ class _CancelOnStartStream(_DummyStream):
         super().start()
 
 
+class _StubBackend:
+    """Minimal transcription backend for tests."""
+
+    def __init__(self, text: str = "hello") -> None:
+        self._text = text
+        self._fn: object = None  # optional callable override
+
+    def transcribe(self, pcm_chunks: list, audio_seconds: float) -> str:
+        if callable(self._fn):
+            return self._fn(pcm_chunks, audio_seconds)
+        return self._text
+
+
 class _DummyThread:
     def __init__(self, *, alive_after_join: bool = False) -> None:
         self.join_timeouts: list[float | None] = []
@@ -101,6 +114,7 @@ def _make_config(runtime_paths: RuntimePaths) -> DictationConfig:
         min_speech_ms=180,
         start_speech_ms=90,
         max_utterance_s=2.5,
+        backend="cpu",
         runtime_paths=runtime_paths,
     )
 
@@ -131,12 +145,11 @@ class DictationDaemonTest(unittest.TestCase):
             stream = _DummyStream()
             daemon = DictationDaemon(
                 _make_config(runtime_paths),
-                model=object(),
+                backend=_StubBackend("hello"),
                 runtime_paths=runtime_paths,
                 event_sink=sink,
                 stream_factory=lambda **kwargs: stream,
                 input_device_resolver=lambda: ("microphone", True),
-                transcription_fn=lambda *args, **kwargs: "hello",
             )
             daemon._vad_worker = lambda: None  # type: ignore[method-assign]
             daemon._decode_worker = lambda: None  # type: ignore[method-assign]
@@ -170,7 +183,7 @@ class DictationDaemonTest(unittest.TestCase):
             sink = _RecordingEventSink(events=[])
             daemon = DictationDaemon(
                 _make_config(runtime_paths),
-                model=object(),
+                backend=_StubBackend(),
                 runtime_paths=runtime_paths,
                 event_sink=sink,
                 stream_factory=lambda **kwargs: _DummyStream(),
@@ -205,7 +218,7 @@ class DictationDaemonTest(unittest.TestCase):
 
             daemon = DictationDaemon(
                 _make_config(runtime_paths),
-                model=object(),
+                backend=_StubBackend(),
                 runtime_paths=runtime_paths,
                 event_sink=sink,
                 stream_factory=lambda **kwargs: stream,
@@ -242,7 +255,7 @@ class DictationDaemonTest(unittest.TestCase):
             stream = _BlockingStartStream(start_called, allow_start_return)
             daemon = DictationDaemon(
                 _make_config(runtime_paths),
-                model=object(),
+                backend=_StubBackend(),
                 runtime_paths=runtime_paths,
                 event_sink=sink,
                 stream_factory=lambda **kwargs: stream,
@@ -276,7 +289,7 @@ class DictationDaemonTest(unittest.TestCase):
             sink = _RecordingEventSink(events=[])
             daemon = DictationDaemon(
                 _make_config(runtime_paths),
-                model=object(),
+                backend=_StubBackend(),
                 runtime_paths=runtime_paths,
                 event_sink=sink,
                 stream_factory=lambda **kwargs: _CancelOnStartStream(daemon),
@@ -299,7 +312,7 @@ class DictationDaemonTest(unittest.TestCase):
             )
             daemon = DictationDaemon(
                 _make_config(runtime_paths),
-                model=object(),
+                backend=_StubBackend(),
                 runtime_paths=runtime_paths,
                 event_sink=_RecordingEventSink(events=[]),
                 stream_factory=lambda **kwargs: _DummyStream(),
@@ -327,7 +340,7 @@ class DictationDaemonTest(unittest.TestCase):
             sink = _RecordingEventSink(events=[])
             daemon = DictationDaemon(
                 _make_config(runtime_paths),
-                model=object(),
+                backend=_StubBackend(),
                 runtime_paths=runtime_paths,
                 event_sink=sink,
                 stream_factory=lambda **kwargs: _DummyStream(),
@@ -408,7 +421,7 @@ class DictationDaemonTest(unittest.TestCase):
             # Forward declaration so the closure can capture `daemon`.
             daemon: DictationDaemon  # set below
 
-            def rotating_transcribe(*args: object, **kwargs: object) -> str:
+            def rotating_transcribe(pcm_chunks: list, audio_seconds: float) -> str:
                 # Simulate the wedge-recovery rotation happening WHILE
                 # the leaked worker is mid-transcribe.
                 with daemon._lock:
@@ -416,14 +429,16 @@ class DictationDaemonTest(unittest.TestCase):
                 rotation_done.set()
                 return "this transcription belongs to a stale session"
 
+            stub = _StubBackend()
+            stub._fn = rotating_transcribe
+
             daemon = DictationDaemon(
                 _make_config(runtime_paths),
-                model=object(),
+                backend=stub,
                 runtime_paths=runtime_paths,
                 event_sink=sink,
                 stream_factory=lambda **kwargs: _DummyStream(),
                 input_device_resolver=lambda: ("microphone", True),
-                transcription_fn=rotating_transcribe,
             )
             try:
                 # Provide a "vad_thread" so the queue.Empty fallback path
@@ -467,7 +482,7 @@ class DictationDaemonTest(unittest.TestCase):
             )
             daemon = DictationDaemon(
                 _make_config(runtime_paths),
-                model=object(),
+                backend=_StubBackend(),
                 runtime_paths=runtime_paths,
                 event_sink=_RecordingEventSink(events=[]),
                 stream_factory=lambda **kwargs: _DummyStream(),
@@ -504,7 +519,7 @@ class DictationDaemonTest(unittest.TestCase):
             )
             daemon = DictationDaemon(
                 _make_config(runtime_paths),
-                model=object(),
+                backend=_StubBackend(),
                 runtime_paths=runtime_paths,
                 event_sink=_RecordingEventSink(events=[]),
                 stream_factory=lambda **kwargs: _DummyStream(),
@@ -534,7 +549,7 @@ class DictationDaemonTest(unittest.TestCase):
             )
             daemon = DictationDaemon(
                 _make_config(runtime_paths),
-                model=object(),
+                backend=_StubBackend(),
                 runtime_paths=runtime_paths,
                 event_sink=_RecordingEventSink(events=[]),
                 stream_factory=lambda **kwargs: _DummyStream(),

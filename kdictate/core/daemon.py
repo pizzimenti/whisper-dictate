@@ -23,8 +23,8 @@ from kdictate.audio_common import (
     VADConfig,
     VADSegmenter,
     load_whisper_model,
-    transcribe_pcm,
 )
+from kdictate.backend import TranscriptionBackend, create_cpu_backend
 from kdictate.config import DictationConfig, parse_args
 from kdictate.constants import STATE_ERROR, STATE_IDLE, STATE_RECORDING, STATE_STARTING, STATE_TRANSCRIBING
 from kdictate.core.audio import resolve_default_input_device
@@ -101,24 +101,22 @@ class DictationDaemon:
     def __init__(
         self,
         config: DictationConfig,
-        model: Any,
+        backend: TranscriptionBackend,
         runtime_paths: RuntimePaths,
         *,
         event_sink: DaemonEventSink | None = None,
         logger: logging.Logger | None = None,
         stream_factory: Callable[..., Any] | None = None,
         input_device_resolver: Callable[[], tuple[str, bool]] = resolve_default_input_device,
-        transcription_fn: Callable[..., str] = transcribe_pcm,
         notify_error_fn: Callable[[str, str], None] | None = None,
     ) -> None:
         self.config = config
-        self.model = model
+        self._backend = backend
         self.runtime_paths = runtime_paths
         self._event_sink = event_sink or _NullEventSink()
         self._logger = logger or configure_logging("kdictate.daemon.core")
         self._stream_factory = stream_factory
         self._input_device_resolver = input_device_resolver
-        self._transcription_fn = transcription_fn
         # Desktop-notification side-effect, injected so tests can replace
         # it with a no-op or a recorder. Default uses real notify-send.
         self._notify_error_fn = notify_error_fn or self._send_desktop_notification
@@ -485,15 +483,7 @@ class DictationDaemon:
             pending = utterance_queue.qsize()
             try:
                 t0 = time.monotonic()
-                text = self._transcription_fn(
-                    self.model,
-                    pcm_chunks,
-                    language=self.config.language,
-                    beam_size=self.config.beam_size,
-                    no_speech_threshold=self.config.no_speech_threshold,
-                    condition_on_previous_text=self.config.condition_on_previous_text,
-                    vad_filter=self.config.vad_filter,
-                )
+                text = self._backend.transcribe(pcm_chunks, audio_seconds)
                 decode_s = time.monotonic() - t0
                 # One more generation check before publishing — the
                 # rotation may have happened during the (potentially
@@ -885,14 +875,32 @@ def main(argv: list[str] | None = None) -> int:
         logger.error("%s", exc)
         return 1
 
-    logger.info(
-        "model ready device=%s compute_type=%s cpu_threads=%s",
-        runtime["device"],
-        runtime["compute_type"],
-        runtime["cpu_threads"],
-    )
+    backend_name = config.backend
+    need_cpu_model = backend_name == "cpu"
 
-    daemon = DictationDaemon(config, model, config.runtime_paths, logger=logger)
+    if backend_name in ("gpu", "auto"):
+        from kdictate.backend import create_gpu_backend
+        gpu = create_gpu_backend(config)
+        if gpu is not None:
+            backend: TranscriptionBackend = gpu
+            logger.info("using GPU backend (whisper.cpp + Vulkan)")
+        elif backend_name == "gpu":
+            logger.error("GPU backend requested but unavailable")
+            return 1
+        else:
+            need_cpu_model = True
+
+    if need_cpu_model:
+        logger.info(
+            "CPU backend: device=%s compute_type=%s cpu_threads=%s",
+            runtime["device"],
+            runtime["compute_type"],
+            runtime["cpu_threads"],
+        )
+        backend = create_cpu_backend(model, config)
+        logger.info("using CPU backend (faster-whisper)")
+
+    daemon = DictationDaemon(config, backend, config.runtime_paths, logger=logger)
 
     try:
         from kdictate.service.dbus_service import SessionDbusService

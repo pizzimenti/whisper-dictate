@@ -30,6 +30,7 @@ class DictationConfig:
     min_speech_ms: int
     start_speech_ms: int
     max_utterance_s: float
+    backend: str
     runtime_paths: RuntimePaths
 
     @classmethod
@@ -56,6 +57,7 @@ class DictationConfig:
             min_speech_ms=namespace.min_speech_ms,
             start_speech_ms=namespace.start_speech_ms,
             max_utterance_s=namespace.max_utterance_s,
+            backend=namespace.backend,
             runtime_paths=runtime_paths,
         )
 
@@ -67,6 +69,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     defaults = daemon_arg_defaults()
     parser = argparse.ArgumentParser(
         description="KDictate daemon backed by session D-Bus."
+    )
+    parser.add_argument(
+        "--backend",
+        choices=("cpu", "gpu", "auto"),
+        default="cpu",
+        help="Transcription backend: cpu (faster-whisper), gpu (whisper.cpp Vulkan), or auto.",
     )
     parser.add_argument(
         "--model-dir",
