@@ -869,28 +869,28 @@ def main(argv: list[str] | None = None) -> int:
     # bug fixed in b1cc382 was able to happen in the first place.
     base_logger = configure_logging("kdictate.daemon", log_file="daemon.log")
     logger = get_propagating_child(base_logger, "core")
-    try:
-        config, model, runtime = _load_model_and_config(argv)
-    except (ConfigurationError, FileNotFoundError) as exc:
-        logger.error("%s", exc)
-        return 1
+    namespace = parse_args(argv)
+    config = DictationConfig.from_namespace(namespace)
 
     backend_name = config.backend
-    need_cpu_model = backend_name == "cpu"
+    backend: TranscriptionBackend | None = None
 
     if backend_name in ("gpu", "auto"):
         from kdictate.backend import create_gpu_backend
         gpu = create_gpu_backend(config)
         if gpu is not None:
-            backend: TranscriptionBackend = gpu
+            backend = gpu
             logger.info("using GPU backend (whisper.cpp + Vulkan)")
         elif backend_name == "gpu":
             logger.error("GPU backend requested but unavailable")
             return 1
-        else:
-            need_cpu_model = True
 
-    if need_cpu_model:
+    if backend is None:
+        try:
+            model, runtime = load_model(config)
+        except (ConfigurationError, FileNotFoundError) as exc:
+            logger.error("%s", exc)
+            return 1
         logger.info(
             "CPU backend: device=%s compute_type=%s cpu_threads=%s",
             runtime["device"],
