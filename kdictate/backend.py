@@ -113,6 +113,8 @@ class WhisperCppBackend:
             "--threads", str(self.n_threads),
             "--no-timestamps",
             "--no-prints",
+            "--output-txt",
+            "--output-file", "-",
             "--file", "-",
         ]
 
@@ -182,6 +184,8 @@ def _probe_whisper_cpp(binary: str, model_path: str) -> bool:
                 "--language", "en",
                 "--no-timestamps",
                 "--no-prints",
+                "--output-txt",
+                "--output-file", "-",
                 "--file", "-",
             ],
             input=wav_bytes,
