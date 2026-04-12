@@ -94,7 +94,7 @@ class VADConfig:
 
     sample_rate: int = 16000
     block_ms: int = 30
-    energy_threshold: float = 600.0
+    energy_threshold: float = 900.0
     silence_ms: int = 300
     min_speech_ms: int = 180
     start_speech_ms: int = 90

@@ -108,6 +108,7 @@ class WhisperCppBackend:
     def __init__(self, binary: str, model_path: str | Path, *,
                  language: str = "en", beam_size: int = _GPU_BEAM_SIZE,
                  n_threads: int = 6, flash_attn: bool = _GPU_FLASH_ATTN,
+                 no_speech_threshold: float = 0.6,
                  ) -> None:
         self.binary = binary
         self.model_path = str(model_path)
@@ -115,6 +116,7 @@ class WhisperCppBackend:
         self.beam_size = beam_size
         self.n_threads = n_threads
         self.flash_attn = flash_attn
+        self.no_speech_threshold = no_speech_threshold
 
     def _build_cmd(self) -> list[str]:
         """Build the whisper.cpp CLI command with all runtime flags."""
@@ -124,6 +126,7 @@ class WhisperCppBackend:
             "--language", self.language,
             "--beam-size", str(self.beam_size),
             "--threads", str(self.n_threads),
+            "--no-speech-thold", str(self.no_speech_threshold),
             "--no-timestamps", "--no-prints",
             "--output-txt", "--output-file", "-",
             "--file", "-",
@@ -190,11 +193,13 @@ def create_gpu_backend(config: Any) -> WhisperCppBackend | None:
         binary, GGML_MODEL_PATH,
         language=config.language,
         n_threads=config.cpu_threads,
+        no_speech_threshold=config.no_speech_threshold,
     )
 
     logger.info(
-        "GPU backend: binary=%s model=%s beam=%d threads=%d flash_attn=%s",
-        binary, GGML_MODEL_PATH, backend.beam_size, backend.n_threads, backend.flash_attn,
+        "GPU backend: binary=%s model=%s beam=%d threads=%d flash_attn=%s no_speech_thold=%.2f",
+        binary, GGML_MODEL_PATH, backend.beam_size, backend.n_threads,
+        backend.flash_attn, backend.no_speech_threshold,
     )
 
     # Probe with the exact same flags used at runtime.
