@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import queue
 import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger("kdictate.daemon.vad")
 
 VAD_QUEUE_POLL_TIMEOUT_S = 0.15
 AUDIO_QUEUE_MAXSIZE = 512    # ~15s of 30ms blocks at 16kHz
@@ -152,10 +155,15 @@ class VADSegmenter:
             nonlocal trailing_silence_count, utterance_pcm, pending_speech_pcm, pending_silence_pcm
             if speech_block_count >= min_speech_blocks and utterance_pcm:
                 audio_seconds = sum(len(c) for c in utterance_pcm) / float(cfg.sample_rate)
+                pending = self.utterance_queue.qsize()
                 try:
                     self.utterance_queue.put_nowait((list(utterance_pcm), audio_seconds))
+                    logger.info(
+                        "utterance committed: %.1fs audio, %d blocks, %d queued",
+                        audio_seconds, speech_block_count, pending,
+                    )
                 except queue.Full:
-                    pass
+                    logger.warning("utterance dropped (queue full): %.1fs audio", audio_seconds)
             in_speech = False
             speech_block_count = 0
             pending_speech_block_count = 0
@@ -180,6 +188,7 @@ class VADSegmenter:
                         pending_speech_block_count += 1
                         if pending_speech_block_count >= start_speech_blocks:
                             in_speech = True
+                            logger.info("speech started (rms=%.0f)", rms)
                             utterance_pcm = list(pending_speech_pcm)
                             speech_block_count = len(utterance_pcm)
                             pending_speech_pcm = []
@@ -201,6 +210,7 @@ class VADSegmenter:
                     pending_speech_block_count = 0
 
                 if in_speech and speech_block_count >= max_utterance_blocks:
+                    logger.info("force-commit (max utterance reached)")
                     commit()
                     continue
 

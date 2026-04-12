@@ -18,6 +18,9 @@ from typing import Any, Protocol
 from kdictate.app_metadata import GGML_MODEL_PATH
 from kdictate.audio_common import transcribe_pcm
 
+# This logger is a child of kdictate.daemon so it propagates to the
+# daemon's file handler. It works because get_propagating_child in
+# daemon.main() wires up the parent before any backend code runs.
 logger = logging.getLogger("kdictate.daemon.backend")
 
 
@@ -140,6 +143,10 @@ class WhisperCppBackend:
             return ""
 
         text = result.stdout.decode(errors="replace").strip()
+        stderr_text = result.stderr.decode(errors="replace").strip()
+        if stderr_text:
+            logger.info("whisper.cpp stderr: %s", stderr_text[:200])
+        logger.info("whisper.cpp returned %d chars", len(text))
         if not text:
             return ""
         # Normalize whitespace the same way as the CPU backend.

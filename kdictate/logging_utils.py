@@ -4,14 +4,19 @@ from __future__ import annotations
 
 import logging
 import os
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import TextIO
 
 DEFAULT_LOG_FORMAT = (
-    "%(asctime)s %(levelname)s %(name)s "
-    "[pid=%(process)d thread=%(threadName)s] %(message)s"
+    "%(asctime)s.%(msecs)03d %(levelname)s %(name)s "
+    "[%(threadName)s] %(message)s"
 )
-DEFAULT_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+DEFAULT_DATE_FORMAT = "%H:%M:%S"
+
+# Logs rotate at 1 MB, keep 1 backup (so max ~2 MB per log file).
+_MAX_LOG_BYTES = 1_000_000
+_BACKUP_COUNT = 1
 
 
 def _formatter() -> logging.Formatter:
@@ -42,9 +47,10 @@ def configure_logging(
 ) -> logging.Logger:
     """Configure and return a named logger with a stderr (and optional file) sink.
 
-    When *log_file* is given (just a filename, not a path), a file handler
-    is also attached under ``$XDG_STATE_HOME/kdictate/<log_file>`` so
-    subprocesses whose stderr is /dev/null still produce debuggable output.
+    When *log_file* is given (just a filename, not a path), a rotating
+    file handler is attached under ``$XDG_STATE_HOME/kdictate/<log_file>``
+    so subprocesses whose stderr is /dev/null still produce debuggable
+    output. Logs rotate at 1 MB with 1 backup (~2 MB max per file).
     """
 
     logger = logging.getLogger(logger_name)
@@ -87,10 +93,11 @@ def get_propagating_child(parent: logging.Logger, suffix: str) -> logging.Logger
 
 
 def attach_file_handler(logger: logging.Logger, filename: str) -> None:
-    """Attach a file handler under XDG_STATE_HOME/kdictate/<filename>.
+    """Attach a rotating file handler under XDG_STATE_HOME/kdictate/<filename>.
 
     Idempotent: if a file handler for the same path is already present,
     it is left alone. Silently no-ops if the directory cannot be created.
+    Rotates at 1 MB, keeps 1 backup.
     """
 
     log_dir = _resolve_log_dir()
@@ -99,10 +106,14 @@ def attach_file_handler(logger: logging.Logger, filename: str) -> None:
     target = log_dir / filename
     target_str = str(target)
     for handler in logger.handlers:
-        if isinstance(handler, logging.FileHandler) and handler.baseFilename == target_str:
-            return
+        if isinstance(handler, (logging.FileHandler, RotatingFileHandler)):
+            if handler.baseFilename == target_str:
+                return
     try:
-        file_handler = logging.FileHandler(target, mode="a", encoding="utf-8")
+        file_handler = RotatingFileHandler(
+            target, maxBytes=_MAX_LOG_BYTES, backupCount=_BACKUP_COUNT,
+            encoding="utf-8",
+        )
     except OSError:
         return
     file_handler.setFormatter(_formatter())

@@ -494,8 +494,9 @@ class DictationDaemon:
                     )
                     return
                 self._logger.info(
-                    "decode %.1fs audio in %.1fs (%.2fx RT, %d queued)",
+                    "decode %.1fs audio in %.1fs (%.2fx RT, %d queued) -> %d chars",
                     audio_seconds, decode_s, decode_s / max(audio_seconds, 0.01), pending,
+                    len(text),
                 )
                 if text:
                     self._record_partial_text(text)
@@ -869,6 +870,9 @@ def main(argv: list[str] | None = None) -> int:
     # bug fixed in b1cc382 was able to happen in the first place.
     base_logger = configure_logging("kdictate.daemon", log_file="daemon.log")
     logger = get_propagating_child(base_logger, "core")
+    # Wire up subsystem loggers so they propagate to daemon.log.
+    get_propagating_child(base_logger, "backend")
+    get_propagating_child(base_logger, "vad")
     namespace = parse_args(argv)
     config = DictationConfig.from_namespace(namespace)
 
