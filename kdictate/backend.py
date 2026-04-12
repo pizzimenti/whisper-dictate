@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from kdictate.app_metadata import GGML_MODEL_PATH
+from kdictate.audio_common import transcribe_pcm
 
 logger = logging.getLogger("kdictate.daemon.backend")
 
@@ -47,33 +48,15 @@ class FasterWhisperBackend:
         self.vad_filter = vad_filter
 
     def transcribe(self, pcm_chunks: list[Any], audio_seconds: float) -> str:
-        import numpy as np
-
-        if not pcm_chunks:
-            return ""
-        audio = np.concatenate(pcm_chunks).astype(np.float32) / 32768.0
-        audio = audio.clip(-1.0, 1.0)
-        if audio.size == 0:
-            return ""
-
-        segments, _ = self.model.transcribe(
-            audio,
+        return transcribe_pcm(
+            self.model,
+            pcm_chunks,
             language=self.language,
-            task="transcribe",
             beam_size=self.beam_size,
-            best_of=1,
-            temperature=0.0,
+            no_speech_threshold=self.no_speech_threshold,
             condition_on_previous_text=self.condition_on_previous_text,
             vad_filter=self.vad_filter,
-            no_speech_threshold=self.no_speech_threshold,
-            without_timestamps=True,
         )
-        text = " ".join(
-            s.text.strip() for s in segments if s.text and s.text.strip()
-        ).strip()
-        if not text:
-            return ""
-        return " ".join(text.replace("\r", " ").replace("\n", " ").split())
 
 
 # ------------------------------------------------------------------

@@ -26,11 +26,11 @@ while offering a real latency improvement where Vulkan is available.
 ### M1 -- whisper.cpp subprocess integration
 
 Wire whisper.cpp as an alternative transcription backend behind the
-existing `transcribe_pcm()` interface.
+existing `TranscriptionBackend` protocol.
 
 - Add a `WhisperCppBackend` that shells out to `whisper-cpp` CLI or
   links via `pywhispercpp` bindings
-- Accept PCM audio, return text -- same contract as `transcribe_pcm()`
+- Accept PCM audio, return text -- same contract as `FasterWhisperBackend`
 - Detect whether `whisper-cpp` is available at daemon startup
 - Add `--backend cpu|gpu|auto` flag (`auto` = try GPU, fall back to CPU)
 - Keep the daemon, VAD, D-Bus, and IBus layers completely unchanged
