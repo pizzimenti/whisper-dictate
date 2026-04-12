@@ -481,6 +481,11 @@ class DictationDaemon:
                 break
             pcm_chunks, audio_seconds = item
             pending = utterance_queue.qsize()
+            if audio_seconds < 0.5:
+                self._logger.info(
+                    "skipping %.1fs utterance (too short to transcribe)", audio_seconds,
+                )
+                continue
             try:
                 t0 = time.monotonic()
                 text = self._backend.transcribe(pcm_chunks, audio_seconds)
