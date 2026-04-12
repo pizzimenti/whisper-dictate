@@ -37,6 +37,46 @@ def load_whisper_model(
     )
 
 
+def transcribe_pcm(
+    model: Any,
+    pcm_chunks: list[Any],
+    *,
+    language: str = "en",
+    task: str = "transcribe",
+    beam_size: int = 1,
+    no_speech_threshold: float = 0.6,
+    condition_on_previous_text: bool = False,
+    vad_filter: bool = True,
+) -> str:
+    """Transcribe a list of int16 PCM chunks and return normalized text."""
+    import numpy as np
+
+    if not pcm_chunks:
+        return ""
+
+    audio = np.concatenate(pcm_chunks).astype(np.float32) / 32768.0
+    audio = audio.clip(-1.0, 1.0)
+    if audio.size == 0:
+        return ""
+
+    segments, _ = model.transcribe(
+        audio,
+        language=language,
+        task=task,
+        beam_size=beam_size,
+        best_of=1,
+        temperature=0.0,
+        condition_on_previous_text=condition_on_previous_text,
+        vad_filter=vad_filter,
+        no_speech_threshold=no_speech_threshold,
+        without_timestamps=True,
+    )
+    text = " ".join(s.text.strip() for s in segments if s.text and s.text.strip()).strip()
+    if not text:
+        return ""
+    return " ".join(text.replace("\r", " ").replace("\n", " ").split())
+
+
 @dataclass
 class VADConfig:
     """Parameters for the energy-based VAD segmenter."""
