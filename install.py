@@ -289,20 +289,25 @@ def install_python_environment(ctx: InstallContext) -> None:
 
 
 def download_cpu_model(ctx: InstallContext) -> None:
+    """Download the CTranslate2 model with a single clean progress bar.
+
+    Uses ``local_dir_use_symlinks=False`` so files are written directly
+    (no symlink farm), and ``max_workers=1`` so tqdm shows one bar at a
+    time instead of overlapping parallel fetches.
+    """
     model_dir = ctx.runtime_dir / DEFAULT_MODEL_NAME
     subprocess.run([
         str(ctx.python_bin), "-u", "-c",
         f"from huggingface_hub import snapshot_download; "
         f"snapshot_download(repo_id={DEFAULT_MODEL_HF_REPO!r}, "
-        f"local_dir={str(model_dir)!r})",
+        f"local_dir={str(model_dir)!r}, "
+        f"max_workers=1)",
     ], check=True)
 
 
 def download_gpu_model(ctx: InstallContext) -> None:
+    """Download the GGML Q8_0 model (single file, single progress bar)."""
     GGML_MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
-    # hf_hub_download checks file hashes internally and re-downloads
-    # incomplete or corrupt files, so we always call it (same as the
-    # CPU model's snapshot_download).
     subprocess.run([
         str(ctx.python_bin), "-u", "-c",
         f"from huggingface_hub import hf_hub_download; "
@@ -457,12 +462,10 @@ def main() -> int:
 
     if gpu:
         step("Downloading GPU model")
-        print(flush=True)
         download_gpu_model(ctx)
         step_done(GGML_MODEL_HF_REPO)
     else:
         step("Downloading CPU model")
-        print(flush=True)
         download_cpu_model(ctx)
         step_done(DEFAULT_MODEL_HF_REPO)
 
