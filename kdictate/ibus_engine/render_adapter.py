@@ -98,11 +98,15 @@ class IbusRenderAdapter:
             # spurious hide_preedit_text calls on focus-out while the
             # preedit was never shown in the first place.
             return
+        # Use update_preedit_text_with_mode with visible=False to hide the
+        # preedit.  Do NOT send a separate hide_preedit_text() signal —
+        # Chromium's IBus client interprets that as "commit the current
+        # preedit buffer", which causes the status-animation text to be
+        # inserted into the focused field instead of the final transcript.
         self._engine.update_preedit_text_with_mode(
             self._ibus.Text.new_from_string(""), 0, False,
             self._ibus.PreeditFocusMode.CLEAR,
         )
-        self._engine.hide_preedit_text()
         self._visible = False
 
     def _tick(self) -> bool:

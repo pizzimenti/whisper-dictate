@@ -104,22 +104,15 @@ class DictationEngineController:
         self._logger.debug("IBus engine focus in")
 
         if self._state.deferred_text:
-            still_dictating = (
-                self._state.enabled
-                and self._state.daemon_available
-                and self._state.daemon_state in {STATE_RECORDING, STATE_TRANSCRIBING}
+            # Always commit deferred text.  It was produced by a real
+            # FinalTranscript; the daemon state at focus-return time is
+            # irrelevant (idle just means the session completed while
+            # we lacked focus — the text is still valid).
+            self._logger.info(
+                "Flushing deferred text on focus return (%d chars)",
+                len(self._state.deferred_text),
             )
-            if still_dictating:
-                self._logger.info(
-                    "Flushing deferred text on focus return (%d chars)",
-                    len(self._state.deferred_text),
-                )
-                self._adapter.commit_text(self._state.deferred_text)
-            else:
-                self._logger.info(
-                    "Discarding deferred text (dictation ended while unfocused, %d chars)",
-                    len(self._state.deferred_text),
-                )
+            self._adapter.commit_text(self._state.deferred_text)
             self._state.deferred_text = ""
 
         self._sync_preedit(reason="focus-in")
@@ -168,12 +161,12 @@ class DictationEngineController:
 
         if state in {STATE_IDLE, STATE_STARTING, STATE_ERROR}:
             self._state.pending_partial = ""
-            if self._state.deferred_text:
-                self._logger.info(
-                    "Discarding deferred text on state %s (%d chars)",
-                    state, len(self._state.deferred_text),
-                )
-                self._state.deferred_text = ""
+            # Do NOT discard deferred_text here.  Deferred text was
+            # produced by a completed FinalTranscript while the engine
+            # lacked focus (common on Chromium/Wayland where spurious
+            # focus-out events arrive during transcription).  The text
+            # must survive until focus_in commits it; discarding on
+            # idle would silently lose the user's dictation.
             self._hide_preedit(reason=f"state-{state}")
             return
 
@@ -228,8 +221,15 @@ class DictationEngineController:
             return
 
         self._logger.info("Committing final transcript through IBus (%d chars)", len(normalized))
-        self._hide_preedit(reason="final-before-commit")
+        # Commit first, THEN clear preedit.  On Wayland the IBus daemon
+        # translates each engine call into a separate text-input-v3
+        # batch.  If we clear preedit first, Chromium finalises the
+        # animation text into the field before the real commit arrives.
+        # Committing while the preedit is still visible lets the client
+        # insert the text, and the subsequent clear removes the stale
+        # animation without side effects.
         self._adapter.commit_text(normalized)
+        self._hide_preedit(reason="final-after-commit")
 
     def handle_error(self, code: str, message: str) -> None:
         """Record a recoverable error from the daemon."""

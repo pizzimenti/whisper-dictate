@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Final
 
-APP_VERSION: Final[str] = "0.8.1"
+APP_VERSION: Final[str] = "0.8.2"
 DISPLAY_NAME: Final[str] = "KDictate"
 APP_AUTHOR: Final[str] = "Bradley Pizzimenti"
 APP_HOMEPAGE: Final[str] = "https://github.com/pizzimenti/kdictate"

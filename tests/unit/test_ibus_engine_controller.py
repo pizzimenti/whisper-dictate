@@ -52,21 +52,25 @@ class DictationEngineControllerTest(unittest.TestCase):
         self.assertTrue(self.controller.state.preedit_visible)
         self.assertEqual(self.controller.state.pending_partial, "hello world")
 
-    def test_final_transcript_clears_preedit_then_commits_when_focused(self) -> None:
+    def test_final_transcript_commits_then_clears_preedit_when_focused(self) -> None:
         self._ready_recording()
         self.controller.handle_partial_transcript("hello world")
         self.adapter.actions.clear()
 
         self.controller.handle_final_transcript("hello world")
 
+        # commit_text must arrive BEFORE the preedit clear so that
+        # Chromium/Wayland inserts the real text before the animation
+        # preedit is removed (reversing the order causes Chrome to
+        # finalize the preedit animation text into the field).
         self.assertEqual(
             self.adapter.actions,
-            [("hide",), ("commit", "hello world")],
+            [("commit", "hello world"), ("hide",)],
         )
         self.assertFalse(self.controller.state.preedit_visible)
         self.assertEqual(self.controller.state.last_final, "hello world")
 
-    def test_final_transcript_without_focus_is_dropped_and_clears_preedit(self) -> None:
+    def test_final_transcript_without_focus_is_deferred(self) -> None:
         self._ready_recording()
         self.controller.handle_partial_transcript("hello world")
         self.controller.focus_out()
@@ -74,8 +78,30 @@ class DictationEngineControllerTest(unittest.TestCase):
 
         self.controller.handle_final_transcript("hello world")
 
+        # Text is deferred (not committed) because the engine has no focus.
         self.assertEqual(self.adapter.actions, [("hide",)])
         self.assertFalse(any(a[0] == "commit" for a in self.adapter.actions))
+        self.assertEqual(self.controller.state.deferred_text, "hello world")
+
+    def test_deferred_text_committed_on_focus_return_after_idle(self) -> None:
+        """Deferred text from a completed session must survive the idle
+        transition and be committed when focus returns — Chromium on
+        Wayland sends spurious focus-out during transcription."""
+        self._ready_recording()
+        self.controller.handle_partial_transcript("hello world")
+        self.controller.focus_out()
+
+        self.controller.handle_final_transcript("hello world")
+        self.controller.handle_state_changed(STATE_IDLE)
+
+        # Text must still be waiting, NOT discarded by the idle handler.
+        self.assertEqual(self.controller.state.deferred_text, "hello world")
+
+        self.adapter.actions.clear()
+        self.controller.focus_in()
+
+        self.assertIn(("commit", "hello world"), self.adapter.actions)
+        self.assertEqual(self.controller.state.deferred_text, "")
 
     def test_daemon_disconnect_and_reconnect_reconcile_state(self) -> None:
         self._ready_recording()

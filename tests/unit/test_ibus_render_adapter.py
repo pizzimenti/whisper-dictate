@@ -136,7 +136,12 @@ class IbusRenderAdapterTest(unittest.TestCase):
         self.adapter.set_preedit(None)
 
         self.assertEqual(len(self.glib.cancelled), 1)
-        self.assertGreaterEqual(self.engine.hidden, 1)
+        # Preedit is cleared via update_preedit_text_with_mode(visible=False)
+        # rather than hide_preedit_text() — Chrome commits preedit on hide.
+        last_call = self.engine.preedit_calls[-1]
+        self.assertEqual(last_call[0], "")      # empty text
+        self.assertFalse(last_call[2])           # visible=False
+        self.assertEqual(self.engine.hidden, 0)
 
     # -- timer ticks --------------------------------------------------------
 
@@ -223,17 +228,18 @@ class IbusRenderAdapterTest(unittest.TestCase):
         # the fix, shutdown() only stopped the spinner timer and reset
         # state — if a preedit was on-screen when IBus tore the engine
         # down, the text would stay visible until something else
-        # triggered a hide. shutdown() must call the IBus hide API so
+        # triggered a hide. shutdown() must call the IBus clear API so
         # the user's window is clean.
         self.adapter.set_preedit(PreeditPresentation("hello", "listening"))
-        self.engine.hidden = 0
 
         self.adapter.shutdown()
 
-        # After shutdown, the engine must have received at least one
-        # hide_preedit_text() call, and the adapter must have dropped
-        # the visible flag.
-        self.assertGreaterEqual(self.engine.hidden, 1)
+        # After shutdown, the adapter must have sent an
+        # update_preedit_text_with_mode(visible=False) to clear the
+        # preedit, and dropped the visible flag.
+        last_call = self.engine.preedit_calls[-1]
+        self.assertEqual(last_call[0], "")      # empty text
+        self.assertFalse(last_call[2])           # visible=False
         self.assertFalse(self.adapter._visible)
 
     def test_shutdown_tolerates_engine_raising_during_tear_down(self) -> None:
