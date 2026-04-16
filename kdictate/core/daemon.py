@@ -559,11 +559,6 @@ class DictationDaemon:
             self._write_state(STATE_IDLE)
             return
 
-        # Restore a known-good input gain on every activation — the VAD's
-        # energy_threshold assumes the mic is audible, and Plasma/KDE controls
-        # (or app-level auto-gain) can silently drop it below that floor.
-        set_default_source_volume()
-
         # Check for a stop that arrived while mic validation was in flight.
         if self._cancel_start.is_set():
             with self._lock:
@@ -572,6 +567,13 @@ class DictationDaemon:
             self._logger.info("recording start cancelled before activation")
             self._write_state(STATE_IDLE)
             return
+
+        # Restore a known-good input gain on every activation — the VAD's
+        # energy_threshold assumes the mic is audible, and Plasma/KDE controls
+        # (or app-level auto-gain) can silently drop it below that floor.
+        # Placed after the cancellation gate so a stop-during-validation
+        # doesn't mutate the user's system volume for no reason.
+        set_default_source_volume()
 
         # Start decode before VAD so the decode worker is ready to consume
         # utterances the moment VAD enqueues them.
