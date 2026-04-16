@@ -7,10 +7,12 @@ import unittest
 import numpy as np
 
 from kdictate.audio_common import (
-    HALLUCINATION_RMS_CEILING,
     is_hallucination,
     postprocess_transcript,
 )
+
+# Default energy threshold used for tests (matches daemon_profiles default).
+_ENERGY_THRESHOLD = 1500.0
 
 
 class IsHallucinationTest(unittest.TestCase):
@@ -25,6 +27,10 @@ class IsHallucinationTest(unittest.TestCase):
         self.assertTrue(is_hallucination("Thank you."))
         self.assertTrue(is_hallucination("Okay!"))
         self.assertTrue(is_hallucination('"you"'))
+
+    def test_collapses_internal_whitespace(self) -> None:
+        self.assertTrue(is_hallucination("thank   you"))
+        self.assertTrue(is_hallucination("the\t end"))
 
     def test_real_sentence_not_filtered(self) -> None:
         self.assertFalse(is_hallucination("Thank you for your help"))
@@ -46,13 +52,12 @@ class IsHallucinationTest(unittest.TestCase):
 
 class PostprocessTranscriptTest(unittest.TestCase):
     def _silent_chunks(self) -> list[np.ndarray]:
-        """PCM chunks with avg RMS well below the ceiling."""
+        """PCM chunks with avg RMS well below the default threshold."""
         return [np.zeros(1600, dtype=np.int16)]
 
     def _loud_chunks(self) -> list[np.ndarray]:
-        """PCM chunks with avg RMS well above the ceiling."""
-        rms_target = HALLUCINATION_RMS_CEILING * 3
-        samples = np.full(1600, rms_target, dtype=np.int16)
+        """PCM chunks with avg RMS well above the default threshold."""
+        samples = np.full(1600, _ENERGY_THRESHOLD * 3, dtype=np.int16)
         return [samples]
 
     def test_suppresses_hallucination_on_silence(self) -> None:
@@ -76,3 +81,20 @@ class PostprocessTranscriptTest(unittest.TestCase):
     def test_real_sentence_passes(self) -> None:
         text = "Please send the report"
         self.assertEqual(postprocess_transcript(text, self._silent_chunks()), text)
+
+    def test_empty_pcm_arrays_do_not_suppress(self) -> None:
+        """Zero-length arrays in pcm_chunks must not produce NaN or crash."""
+        chunks = [np.array([], dtype=np.int16)]
+        self.assertEqual(postprocess_transcript("Thank you.", chunks), "Thank you.")
+
+    def test_custom_energy_threshold(self) -> None:
+        """Hallucination filter respects a caller-supplied threshold."""
+        # Chunks with RMS ~500: below default 1500 but above a low threshold.
+        chunks = [np.full(1600, 500, dtype=np.int16)]
+        # Suppressed at default threshold
+        self.assertEqual(postprocess_transcript("okay", chunks), "")
+        # Allowed when threshold is lowered below the RMS
+        self.assertEqual(
+            postprocess_transcript("okay", chunks, energy_threshold=200.0),
+            "okay",
+        )

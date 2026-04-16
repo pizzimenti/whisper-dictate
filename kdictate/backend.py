@@ -45,13 +45,14 @@ class FasterWhisperBackend:
 
     def __init__(self, model: Any, *, language: str, beam_size: int,
                  no_speech_threshold: float, condition_on_previous_text: bool,
-                 vad_filter: bool) -> None:
+                 vad_filter: bool, energy_threshold: float = 1500.0) -> None:
         self.model = model
         self.language = language
         self.beam_size = beam_size
         self.no_speech_threshold = no_speech_threshold
         self.condition_on_previous_text = condition_on_previous_text
         self.vad_filter = vad_filter
+        self.energy_threshold = energy_threshold
 
     def transcribe(self, pcm_chunks: list[Any], audio_seconds: float) -> str:
         return transcribe_pcm(
@@ -60,6 +61,7 @@ class FasterWhisperBackend:
             no_speech_threshold=self.no_speech_threshold,
             condition_on_previous_text=self.condition_on_previous_text,
             vad_filter=self.vad_filter,
+            energy_threshold=self.energy_threshold,
         )
 
 
@@ -109,6 +111,7 @@ class WhisperCppBackend:
                  language: str = "en", beam_size: int = _GPU_BEAM_SIZE,
                  n_threads: int = 6, flash_attn: bool = _GPU_FLASH_ATTN,
                  no_speech_threshold: float = 0.6,
+                 energy_threshold: float = 1500.0,
                  ) -> None:
         self.binary = binary
         self.model_path = str(model_path)
@@ -117,6 +120,7 @@ class WhisperCppBackend:
         self.n_threads = n_threads
         self.flash_attn = flash_attn
         self.no_speech_threshold = no_speech_threshold
+        self.energy_threshold = energy_threshold
 
     def _build_cmd(self) -> list[str]:
         """Build the whisper.cpp CLI command with all runtime flags."""
@@ -158,7 +162,7 @@ class WhisperCppBackend:
         text = result.stdout.decode(errors="replace").strip()
         if not text:
             return ""
-        return postprocess_transcript(text, pcm_chunks)
+        return postprocess_transcript(text, pcm_chunks, energy_threshold=self.energy_threshold)
 
 
 # ------------------------------------------------------------------
@@ -175,6 +179,7 @@ def create_cpu_backend(model: Any, config: Any) -> FasterWhisperBackend:
         no_speech_threshold=config.no_speech_threshold,
         condition_on_previous_text=config.condition_on_previous_text,
         vad_filter=config.vad_filter,
+        energy_threshold=config.energy_threshold,
     )
 
 
@@ -194,6 +199,7 @@ def create_gpu_backend(config: Any) -> WhisperCppBackend | None:
         language=config.language,
         n_threads=config.cpu_threads,
         no_speech_threshold=config.no_speech_threshold,
+        energy_threshold=config.energy_threshold,
     )
 
     logger.info(

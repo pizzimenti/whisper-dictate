@@ -17,10 +17,10 @@ AUDIO_QUEUE_MAXSIZE = 512    # ~15s of 30ms blocks at 16kHz
 UTTERANCE_QUEUE_MAXSIZE = 64  # max in-flight utterances
 
 # Whisper models hallucinate these phrases on silence or near-silence.
-# Comparison is case-insensitive with punctuation stripped.  The filter
-# only fires when the utterance average RMS is below
-# ``HALLUCINATION_RMS_CEILING`` so that legitimate short utterances
-# ("okay", "bye") are not suppressed.
+# Comparison is case-insensitive with punctuation and extra whitespace
+# collapsed.  The filter only fires when the utterance average RMS is
+# below the configured VAD energy threshold so that legitimate short
+# utterances ("okay", "bye") are not suppressed.
 HALLUCINATION_PHRASES: frozenset[str] = frozenset({
     "thank you",
     "thanks for watching",
@@ -37,24 +37,22 @@ HALLUCINATION_PHRASES: frozenset[str] = frozenset({
 #: Characters stripped before comparing against ``HALLUCINATION_PHRASES``.
 _PUNCT_TABLE = str.maketrans("", "", ".,!?;:…\"'""''()[]{}")
 
-#: Utterances with average RMS below this ceiling are eligible for
-#: hallucination suppression.  Real speech typically averages well above
-#: the per-block VAD energy threshold (default 1500); near-silent audio
-#: that fools the VAD stays below it.
-HALLUCINATION_RMS_CEILING: float = 1500.0
-
-
 def is_hallucination(text: str) -> bool:
     """Return True if *text* matches a known Whisper hallucination phrase."""
-    normalized = text.translate(_PUNCT_TABLE).strip().lower()
+    normalized = " ".join(text.translate(_PUNCT_TABLE).strip().lower().split())
     return normalized in HALLUCINATION_PHRASES
 
 
-def postprocess_transcript(text: str, pcm_chunks: list[Any]) -> str:
+def postprocess_transcript(
+    text: str,
+    pcm_chunks: list[Any],
+    energy_threshold: float = 1500.0,
+) -> str:
     """Normalize whitespace and suppress hallucinations on near-silent audio.
 
     Both backends should call this on raw transcript text before returning
-    it to the daemon.
+    it to the daemon.  *energy_threshold* should match the configured VAD
+    energy threshold so the suppression ceiling tracks user settings.
     """
     import numpy as np
 
@@ -62,10 +60,11 @@ def postprocess_transcript(text: str, pcm_chunks: list[Any]) -> str:
         return ""
     text = " ".join(text.replace("\r", " ").replace("\n", " ").split())
     if is_hallucination(text) and pcm_chunks:
-        avg_rms = float(np.sqrt(np.mean(
-            np.concatenate(pcm_chunks).astype(np.float32) ** 2
-        )))
-        if avg_rms < HALLUCINATION_RMS_CEILING:
+        samples = np.concatenate(pcm_chunks)
+        if samples.size == 0:
+            return text
+        avg_rms = float(np.sqrt(np.mean(samples.astype(np.float32) ** 2)))
+        if avg_rms < energy_threshold:
             logger.info(
                 "suppressed hallucination: %r (avg_rms=%.0f)", text, avg_rms,
             )
@@ -107,6 +106,7 @@ def transcribe_pcm(
     no_speech_threshold: float = 0.6,
     condition_on_previous_text: bool = False,
     vad_filter: bool = True,
+    energy_threshold: float = 1500.0,
 ) -> str:
     """Transcribe a list of int16 PCM chunks and return normalized text."""
     import numpy as np
@@ -141,7 +141,7 @@ def transcribe_pcm(
     )
     if not text:
         return ""
-    return postprocess_transcript(text, pcm_chunks)
+    return postprocess_transcript(text, pcm_chunks, energy_threshold=energy_threshold)
 
 
 @dataclass
