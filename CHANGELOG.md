@@ -1,29 +1,5 @@
 # Changelog
 
-## 0.10.2 — 2026-04-16
-
-### Fixed
-
-- **Re-check cancellation after the pactl call.** `pactl` can take up
-  to its 3-second timeout to return, and a stop request arriving during
-  that window would still cause the daemon to spawn VAD and decode
-  worker threads before reaching the next cancellation gate. Added an
-  immediate `_cancel_start` check after `set_default_source_volume()`
-  so a cancelled activation no longer pays unnecessary thread-startup
-  and cleanup overhead.
-
-## 0.10.1 — 2026-04-16
-
-### Fixed
-
-- **Respect in-flight cancellation before mutating mic volume.** If a
-  stop request arrived while the activation path was still validating
-  the default input device, the daemon would still run
-  `pactl set-source-volume @DEFAULT_SOURCE@ 91%` before noticing the
-  cancellation — changing the user's system mic gain for a session
-  that was about to abort. Moved the pactl call to immediately after
-  the cancellation gate.
-
 ## 0.10.0 — 2026-04-16
 
 ### Fixed
@@ -34,10 +10,14 @@
   default source's volume below that floor — producing sessions that
   record cleanly but emit `no speech detected` because the RMS never
   crosses threshold. The daemon now calls
-  `pactl set-source-volume @DEFAULT_SOURCE@ 91%` right after mic
-  validation on every start, so the next capture has a known-good
-  gain. pactl failures are logged but non-fatal — recording still
-  proceeds.
+  `pactl set-source-volume @DEFAULT_SOURCE@ 91%` on every start, so
+  the next capture has a known-good gain. The pactl call is sandwiched
+  between two `_cancel_start` gates: it only runs after mic validation
+  passes, and cancellation is re-checked immediately after pactl
+  returns (the call can take up to its 3-second timeout), so a stop
+  request during startup never mutates system volume or spawns worker
+  threads for a session that is about to abort. pactl failures are
+  logged but non-fatal — recording still proceeds.
 
 ## 0.9.2 — 2026-04-16
 
